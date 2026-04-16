@@ -9,10 +9,19 @@ on:
 
 jobs:
   build:
-    runs-on: 'ubuntu-latest'
     permissions:
       packages: 'write'
       contents: 'read'
+
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    runs-on: '${{ matrix.runner }}'
 
     steps:
       - uses: 'actions/checkout@v4'
@@ -27,11 +36,11 @@ jobs:
       - name: 'Build and push'
         run: |
           IMAGE=ghcr.io/makasim/cestorage
-          docker build -t $IMAGE:latest .
-          docker push $IMAGE:latest
+          docker build -t $IMAGE:latest-${{ matrix.arch }} .
+          docker push $IMAGE:latest-${{ matrix.arch }}
 
           if [[ $GITHUB_REF == refs/tags/* ]]; then
             TAG=${GITHUB_REF#refs/tags/}
-            docker tag $IMAGE:latest $IMAGE:$TAG
-            docker push $IMAGE:$TAG
+            docker tag $IMAGE:latest-${{ matrix.arch }} $IMAGE:$TAG-${{ matrix.arch }}
+            docker push $IMAGE:$TAG-${{ matrix.arch }}
           fi
