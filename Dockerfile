@@ -12,4 +12,4 @@ FROM public.ecr.aws/docker/library/alpine:3.23
 
 COPY --from=builder /build/cestorage /cestorage
 
-ENTRYPOINT /cestorage
+CMD ["/cestorage"]
