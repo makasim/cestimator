@@ -1,0 +1,27 @@
+services:
+  cestorage:
+    build: .
+    command:
+      - '-config=/scrape.yaml'
+      - '-httpListenAddr=":8490"'
+    logging:
+      driver: 'journald'
+    x-ports:
+      - '8490:8490@host'
+    configs:
+      - source: 'streams'
+        target: '/config.yaml'
+        mode: 0644
+    x-machines: 'srv-1'
+
+configs:
+  streams:
+    content: |
+      streams:
+        - interval: '2m'
+      
+        - interval: '2m'
+          group: ["__name__"]
+      
+        - interval: '2m'
+          group: ["job"]
