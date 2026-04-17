@@ -2,7 +2,7 @@ services:
   cestorage:
     build: .
     command:
-      - '-config=/scrape.yaml'
+      - '-config=/config.yaml'
       - '-httpListenAddr=":8490"'
     logging:
       driver: 'journald'
