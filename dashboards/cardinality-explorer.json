@@ -23,7 +23,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "PB894574A363DF0AF"
+        "uid": "${ds}"
       },
       "fieldConfig": {
         "defaults": {
@@ -106,8 +106,12 @@
       "pluginVersion": "12.4.3",
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds}"
+          },
           "editorMode": "code",
-          "expr": "topk(10, max(cardinality_estimate{interval=~\"$interval\",group_by_keys=~\"$group_by_keys\",group_by_values=~\"$group_by_values\"}) without (job,instance))",
+          "expr": "topk(10, max(cardinality_estimate{job=~\"$job\",instance=~\"$instance\",interval=~\"$interval\",group_by_keys=~\"$group_by_keys\",group_by_values=~\"$group_by_values\"}) without (job,instance))",
           "legendFormat": "{{group_by_keys}}: {{group_by_values}} ({{interval}})",
           "range": true,
           "refId": "A"
@@ -124,16 +128,89 @@
   "templating": {
     "list": [
       {
+        "current": {
+          "text": "sandbox-monitoring",
+          "value": "PB894574A363DF0AF"
+        },
+        "name": "ds",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
         "allowCustomValue": false,
         "current": {
-          "text": "All",
+          "text": [
+            "All"
+          ],
           "value": [
             "$__all"
           ]
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "PB894574A363DF0AF"
+          "uid": "${ds}"
+        },
+        "definition": "label_values(vm_app_version{version=~\"^cestimator.*\"},job)",
+        "includeAll": true,
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(vm_app_version{version=~\"^cestimator.*\"},job)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "regexApplyTo": "value",
+        "type": "query"
+      },
+      {
+        "allowCustomValue": false,
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${ds}"
+        },
+        "definition": "label_values(vm_app_version{job=~\"$job\", version=~\"^cestimator.*\"},instance)",
+        "description": "",
+        "includeAll": true,
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(vm_app_version{job=~\"$job\", version=~\"^cestimator.*\"},instance)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "regexApplyTo": "value",
+        "type": "query"
+      },
+      {
+        "allowCustomValue": false,
+        "current": {
+          "text": [
+            "5m0s"
+          ],
+          "value": [
+            "5m0s"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${ds}"
         },
         "definition": "label_values(cardinality_estimate,interval)",
         "includeAll": true,
@@ -153,20 +230,15 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": [
-            ""
-          ],
-          "value": [
-            ""
-          ]
+          "text": "__no_group__",
+          "value": "__no_group__"
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "PB894574A363DF0AF"
+          "uid": "${ds}"
         },
         "definition": "label_values(cardinality_estimate{interval=~\"$interval\"},group_by_keys)",
-        "includeAll": false,
-        "multi": true,
+        "includeAll": true,
         "name": "group_by_keys",
         "options": [],
         "query": {
@@ -184,11 +256,13 @@
         "allowCustomValue": false,
         "current": {
           "text": "All",
-          "value": "$__all"
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "PB894574A363DF0AF"
+          "uid": "${ds}"
         },
         "definition": "label_values(cardinality_estimate{interval=~\"$interval\", group_by_keys=~\"$group_by_keys\"},group_by_values)",
         "includeAll": true,
@@ -208,13 +282,13 @@
     ]
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-6h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "utc",
   "title": "Cardinality Explorer",
   "uid": "mktd5h8",
-  "version": 13,
+  "version": 18,
   "weekStart": ""
 }
