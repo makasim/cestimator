@@ -158,8 +158,13 @@ func (e *Estimator) writeMetrics(w io.Writer) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	metricPrefix := fmt.Sprintf("cardinality_estimate{interval=%q,filter=%q,group_by_keys=%q",
-		e.interval, e.filterStr, strings.Join(e.groupBy, ","))
+	groupByKey := "__no_group__"
+	if len(e.groupBy) > 0 {
+		groupByKey = strings.Join(e.groupBy, ",")
+	}
+
+	metricPrefix := fmt.Sprintf("cardinality_estimate{interval=%q,filter=%q",
+		e.interval, e.filterStr)
 
 	if len(e.extraLabels) > 0 {
 		keys := make([]string, 0, len(e.extraLabels))
@@ -186,9 +191,11 @@ func (e *Estimator) writeMetrics(w io.Writer) {
 	for k := range e.prevGroups {
 		keys[k] = struct{}{}
 	}
-	for groupKey := range keys {
-		card := e.estimateSketch(e.groups[groupKey], e.prevGroups[groupKey])
-		fmt.Fprintf(w, "%s,group_by_values=%q} %d\n", metricPrefix, groupKey, card)
+
+	fmt.Fprintf(w, "%s,group_by_keys=\"__no_group__\",group_by_values=%q} %d\n", metricPrefix, groupByKey, len(keys))
+	for groupByVal := range keys {
+		card := e.estimateSketch(e.groups[groupByVal], e.prevGroups[groupByVal])
+		fmt.Fprintf(w, "%s,group_by_keys=%q,group_by_values=%q} %d\n", metricPrefix, groupByKey, groupByVal, card)
 	}
 }
 
