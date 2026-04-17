@@ -77,7 +77,7 @@ func (e *Estimator) Stop() {
 
 // runRotation resets the sketches on every tick until stopCh is closed.
 func (e *Estimator) runRotation() {
-	t := time.NewTicker(e.interval)
+	t := time.NewTicker(e.interval / 2)
 	defer t.Stop()
 	for {
 		select {
