@@ -2,11 +2,8 @@ package main
 
 import (
 	"flag"
-	"io"
 	"os"
 	"time"
-
-	"github.com/VictoriaMetrics/metrics"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/buildinfo"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/envflag"
@@ -41,13 +38,6 @@ func main() {
 		}
 		estimators = append(estimators, e)
 	}
-
-	// Register dynamic cardinality metrics so they appear in the /metrics output.
-	metrics.RegisterMetricsWriter(func(w io.Writer) {
-		for _, e := range estimators {
-			e.writeMetrics(w)
-		}
-	})
 
 	listenAddrs := *httpListenAddrs
 	if len(listenAddrs) == 0 {
