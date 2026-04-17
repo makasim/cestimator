@@ -126,7 +126,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "max(\n    max_over_time(process_resident_memory_bytes{job=~\"cestimator\"}[$__rate_interval])\n    /\n    vm_available_memory_bytes{job=~\"cestimator\"}\n) by(job)",
+          "expr": "max(\n    max_over_time(process_resident_memory_bytes{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])\n    /\n    vm_available_memory_bytes{job=~\"$job\",instance=~\"$instance\"}\n) by(job)",
           "interval": "",
           "legendFormat": "__auto",
           "range": true,
@@ -241,7 +241,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "max(\n    rate(process_cpu_seconds_total{job=\"cestimator\"}[$__rate_interval])\n    /\n    process_cpu_cores_available{job=\"cestimator\"}\n) by(instance)",
+          "expr": "max(\n    rate(process_cpu_seconds_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])\n    /\n    process_cpu_cores_available{job=~\"$job\",instance=~\"$instance\"}\n) by(instance)",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -350,7 +350,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "sum(rate(vm_protoparser_read_calls_total{job=~\"cestimator\",type=\"promremotewrite\"}[$__rate_interval])) by(job, type, net) > 0",
+          "expr": "sum(rate(vm_protoparser_read_calls_total{job=~\"$job\",instance=~\"$instance\",type=\"promremotewrite\"}[$__rate_interval])) by(job, type, net) > 0",
           "interval": "",
           "legendFormat": "{{net}}: {{ type }} ({{job}})",
           "range": true,
@@ -457,7 +457,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "sum(rate(vm_protoparser_rows_read_total{job=~\"cestimator\",type=\"promremotewrite\"}[$__rate_interval])) by(job, type) > 0",
+          "expr": "sum(rate(vm_protoparser_rows_read_total{job=~\"$job\",instance=~\"$instance\",type=\"promremotewrite\"}[$__rate_interval])) by(job, type) > 0",
           "interval": "",
           "legendFormat": "{{ type }} ({{job}})",
           "range": true,
@@ -565,7 +565,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "max_over_time(vm_concurrent_insert_current{job=~\"cestimator\"}[$__rate_interval])",
+          "expr": "max_over_time(vm_concurrent_insert_current{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])",
           "interval": "",
           "legendFormat": "{{instance}} ({{job}})",
           "range": true,
@@ -578,7 +578,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "min(vm_concurrent_insert_capacity{job=~\"cestimator\"}) by(job)",
+          "expr": "min(vm_concurrent_insert_capacity{job=~\"$job\",instance=~\"$instance\"}) by(job)",
           "interval": "",
           "legendFormat": "limit ({{job}})",
           "range": true,
@@ -694,9 +694,202 @@
       ],
       "title": "Error rate",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(cestorage_http_request_duration_seconds_total{job=~\"$job\",instance=~\"$instance\",path=\"/cardinality/metrics\"}))",
+          "format": "time_series",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Scrape cardinality metrics duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "victoriametrics-metrics-datasource",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(cestorage_http_response_size_bytes_total{job=~\"$job\",instance=~\"$instance\",path=\"/cardinality/metrics\"}))",
+          "format": "time_series",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Scrape cardinality response size",
+      "type": "timeseries"
     }
   ],
   "preload": false,
+  "refresh": "10s",
   "schemaVersion": 42,
   "tags": [],
   "templating": {
@@ -704,8 +897,8 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "sandbox-monitoring",
-          "value": "PB894574A363DF0AF"
+          "text": "prometheus",
+          "value": "P1809F7CD0C75ACF3"
         },
         "name": "ds",
         "options": [],
@@ -717,8 +910,12 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "All",
-          "value": "$__all"
+          "text": [
+            "cestimator-macos"
+          ],
+          "value": [
+            "cestimator-macos"
+          ]
         },
         "datasource": {
           "type": "prometheus",
@@ -744,7 +941,9 @@
         "allowCustomValue": false,
         "current": {
           "text": "All",
-          "value": "$__all"
+          "value": [
+            "$__all"
+          ]
         },
         "datasource": {
           "type": "prometheus",
@@ -776,6 +975,6 @@
   "timezone": "utc",
   "title": "cestimator",
   "uid": "mkv22l4",
-  "version": 5,
+  "version": 6,
   "weekStart": ""
 }
