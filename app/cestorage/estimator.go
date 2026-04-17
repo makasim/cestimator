@@ -174,7 +174,7 @@ func (e *Estimator) writeMetrics(w io.Writer) {
 
 	if len(e.groupBy) == 0 {
 		card := e.estimateSketch(e.sketch, e.prevSketch)
-		fmt.Fprintf(w, "%s,group_by_keys=\"__no_group__\"} %d\n", metricPrefix, card)
+		fmt.Fprintf(w, "%s,group_by_keys=\"__no_value__\",group_by_values=\"__no_value__\"} %d\n", metricPrefix, card)
 		return
 	}
 
@@ -189,7 +189,7 @@ func (e *Estimator) writeMetrics(w io.Writer) {
 		keys[k] = struct{}{}
 	}
 
-	fmt.Fprintf(w, "%s,group_by_keys=\"__no_group__\",group_by_values=%q} %d\n", metricPrefix, groupByKey, len(keys))
+	fmt.Fprintf(w, "%s,group_by_keys=\"__no_value__\",group_by_values=%q} %d\n", metricPrefix, groupByKey, len(keys))
 	for groupByVal := range keys {
 		card := e.estimateSketch(e.groups[groupByVal], e.prevGroups[groupByVal])
 		fmt.Fprintf(w, "%s,group_by_keys=%q,group_by_values=%q} %d\n", metricPrefix, groupByKey, groupByVal, card)
