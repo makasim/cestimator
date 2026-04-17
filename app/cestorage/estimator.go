@@ -158,11 +158,6 @@ func (e *Estimator) writeMetrics(w io.Writer) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	groupByKey := "__no_group__"
-	if len(e.groupBy) > 0 {
-		groupByKey = strings.Join(e.groupBy, ",")
-	}
-
 	metricPrefix := fmt.Sprintf("cardinality_estimate{interval=%q,filter=%q",
 		e.interval, e.filterStr)
 
@@ -179,9 +174,11 @@ func (e *Estimator) writeMetrics(w io.Writer) {
 
 	if len(e.groupBy) == 0 {
 		card := e.estimateSketch(e.sketch, e.prevSketch)
-		fmt.Fprintf(w, "%s} %d\n", metricPrefix, card)
+		fmt.Fprintf(w, "%s,group_by_keys=\"__no_group__\"} %d\n", metricPrefix, card)
 		return
 	}
+
+	groupByKey := strings.Join(e.groupBy, ",")
 
 	// Collect all group keys from both current and previous intervals.
 	keys := make(map[string]struct{}, len(e.groups)+len(e.prevGroups))
