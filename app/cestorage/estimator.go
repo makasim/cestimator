@@ -126,6 +126,7 @@ func (e *Estimator) insert(labels []prompb.Label) {
 
 	var key []byte
 	first := true
+	var hasNonEmptyLabel bool
 	for _, labelName := range e.groupBy {
 		if !first {
 			key = append(key, ',')
@@ -133,6 +134,10 @@ func (e *Estimator) insert(labels []prompb.Label) {
 
 		for _, l := range labels {
 			if l.Name == labelName {
+				if l.Value != "" {
+					hasNonEmptyLabel = true
+				}
+
 				key = append(key, l.Value...)
 				break
 			}
@@ -140,6 +145,11 @@ func (e *Estimator) insert(labels []prompb.Label) {
 
 		first = false
 	}
+	// time series does not contribute to this group
+	if !hasNonEmptyLabel {
+		return
+	}
+
 	groupKey := string(key)
 	sk := e.groups[groupKey]
 	if sk == nil {
