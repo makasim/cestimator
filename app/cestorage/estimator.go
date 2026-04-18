@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiomhq/hyperloglog"
+	"github.com/makasim/cestimator/app/cestorage/protoparser"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
 )
@@ -17,9 +18,9 @@ import (
 type estimator struct {
 	groupBy     []string          // label names to group by; empty means no grouping
 	extraLabels map[string]string // extra labels added to output metrics
-	filterStr   string
-	filters     []labelFilter // compiled from config filter
 	interval    time.Duration
+
+	metricPrefix string
 
 	mu         sync.Mutex
 	sketch     *hyperloglog.Sketch            // current-interval sketch; used when group == ""
@@ -32,28 +33,21 @@ type estimator struct {
 
 func (e *estimator) String() string {
 	return fmt.Sprintf(
-		"filter: %s; interval: %s; group_by: %v; extra_labels: %v",
-		e.filterStr, e.interval, e.groupBy, e.extraLabels)
+		"interval: %s; group_by: %v; extra_labels: %v", e.interval, e.groupBy, e.extraLabels)
 }
 
 func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 	if cfg.Interval == 0 {
-		cfg.Interval = Duration(time.Minute * 5)
+		cfg.Interval = time.Minute * 5
 	}
 
 	e := &estimator{
-		groupBy:     cfg.Group,
-		extraLabels: cfg.Labels,
-		filterStr:   cfg.Filter,
-		interval:    time.Duration(cfg.Interval),
-		stopCh:      make(chan struct{}),
+		groupBy:      cfg.Group,
+		extraLabels:  cfg.Labels,
+		interval:     cfg.Interval,
+		metricPrefix: fmt.Sprintf("cardinality_estimate{interval=%q", cfg.Interval),
+		stopCh:       make(chan struct{}),
 	}
-
-	filters, err := compileFilters(cfg.Filter)
-	if err != nil {
-		return nil, fmt.Errorf("stream: %s: parse filters failed: %w", e, err)
-	}
-	e.filters = filters
 
 	if len(cfg.Group) == 0 {
 		sk, err := hyperloglog.NewSketch(14, true)
@@ -110,17 +104,12 @@ func (e *estimator) rotate() {
 }
 
 // insert adds a time series to the estimator if it matches the configured filter.
-func (e *estimator) insert(labels []prompb.Label) {
-	if !matchesFilters(labels, e.filters) {
-		return
-	}
-	fp := fingerprintLabels(labels)
-
+func (e *estimator) insert(ts protoparser.TimeSerie) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	if len(e.groupBy) == 0 {
-		e.sketch.Insert(fp)
+		e.sketch.InsertHash(ts.Fingerprint)
 		return
 	}
 
@@ -132,7 +121,7 @@ func (e *estimator) insert(labels []prompb.Label) {
 			key = append(key, ',')
 		}
 
-		for _, l := range labels {
+		for _, l := range ts.GroupLabels {
 			if l.Name == labelName {
 				if l.Value != "" {
 					hasNonEmptyLabel = true
@@ -160,7 +149,7 @@ func (e *estimator) insert(labels []prompb.Label) {
 		}
 		e.groups[groupKey] = sk
 	}
-	sk.Insert(fp)
+	sk.InsertHash(ts.Fingerprint)
 }
 
 // writeMetrics writes cardinality_estimate metrics to w in Prometheus text format.
@@ -168,8 +157,7 @@ func (e *estimator) writeMetrics(w io.Writer) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	metricPrefix := fmt.Sprintf("cardinality_estimate{interval=%q,filter=%q",
-		e.interval, e.filterStr)
+	metricPrefix := fmt.Sprintf("cardinality_estimate{interval=%q", e.interval)
 
 	if len(e.extraLabels) > 0 {
 		keys := make([]string, 0, len(e.extraLabels))
@@ -240,30 +228,4 @@ func fingerprintLabels(labels []prompb.Label) []byte {
 		b = append(b, 0x00)
 	}
 	return b
-}
-
-// matchesFilters returns true if all filters are satisfied by labels.
-func matchesFilters(labels []prompb.Label, filters []labelFilter) bool {
-	for _, f := range filters {
-		val := ""
-		for _, l := range labels {
-			if l.Name == f.label {
-				val = l.Value
-				break
-			}
-		}
-		var matched bool
-		if f.isRegexp {
-			matched = f.re.MatchString(val)
-		} else {
-			matched = val == f.value
-		}
-		if f.isNegative {
-			matched = !matched
-		}
-		if !matched {
-			return false
-		}
-	}
-	return true
 }

@@ -15,23 +15,23 @@ import (
 
 func BenchmarkParse_EstimatorGlobal(b *testing.B) {
 	data := buildSnappyEncodedWriteRequest(5_000, 3, 5, 1)
-	e, err := newEstimator(EstimatorConfig{Interval: Duration(time.Hour)})
+	e, err := newEstimator(EstimatorConfig{Interval: time.Hour})
 	if err != nil {
 		b.Fatalf("newEstimator: %v", err)
 	}
 	defer e.Stop()
 	estimators := []*estimator{e}
+	groupLabels := make(map[string]struct{})
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+		err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
 			for i := range tss {
 				for _, est := range estimators {
-					est.insert(tss[i].Labels)
+					est.insert(tss[i])
 				}
 			}
-			return nil
 		})
 		if err != nil {
 			b.Fatalf("stream.Parse: %v", err)
@@ -43,24 +43,26 @@ func BenchmarkParse_EstimatorGroup(b *testing.B) {
 	data := buildSnappyEncodedWriteRequest(5_000, 3, 5, 100)
 	e, err := newEstimator(EstimatorConfig{
 		Group:    []string{"groupLabel"},
-		Interval: Duration(time.Hour),
+		Interval: time.Hour,
 	})
 	if err != nil {
 		b.Fatalf("newEstimator: %v", err)
 	}
 	defer e.Stop()
 	estimators := []*estimator{e}
+	groupLabels := map[string]struct{}{
+		"groupLabel": {},
+	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+		err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
 			for i := range tss {
 				for _, est := range estimators {
-					est.insert(tss[i].Labels)
+					est.insert(tss[i])
 				}
 			}
-			return nil
 		})
 		if err != nil {
 			b.Fatalf("stream.Parse: %v", err)

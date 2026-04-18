@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/httpserver"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/makasim/cestimator/app/cestorage/protoparser"
 )
@@ -29,11 +28,18 @@ var (
 )
 
 func requestHandler(estimators []*estimator) httpserver.RequestHandler {
+	groupLabels := make(map[string]struct{})
+	for _, e := range estimators {
+		for _, l := range e.groupBy {
+			groupLabels[l] = struct{}{}
+		}
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) bool {
 		switch r.URL.Path {
 		case "/api/v1/write":
 			prometheusWriteRequests.Inc()
-			handleRemoteWrite(w, r, estimators)
+			handleRemoteWrite(w, r, groupLabels, estimators)
 			return true
 		case "/cardinality/metrics":
 			handleCardinalityMetrics(w, r, estimators)
@@ -66,16 +72,14 @@ func handleCardinalityMetrics(w http.ResponseWriter, _ *http.Request, estimators
 	cardinalityMetricsBytesTotal.Add(len(responseData))
 }
 
-func handleRemoteWrite(w http.ResponseWriter, r *http.Request, estimators []*estimator) {
-	isVMRemoteWrite := r.Header.Get("Content-Encoding") == "zstd"
-	err := protoparser.Parse(r.Body, isVMRemoteWrite, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+func handleRemoteWrite(w http.ResponseWriter, r *http.Request, groupLabels map[string]struct{}, estimators []*estimator) {
+	err := protoparser.Parse(r.Body, groupLabels, func(tss []protoparser.TimeSerie) {
 		for i := range tss {
 			for _, e := range estimators {
-				e.insert(tss[i].Labels)
+				e.insert(tss[i])
 			}
 		}
 		rowsInserted.Add(len(tss))
-		return nil
 	})
 	if err != nil {
 		httpserver.Errorf(w, r, "error parsing remote write request: %s", err)
