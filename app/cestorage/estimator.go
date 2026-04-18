@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
 	"github.com/alphadose/haxmap"
 	"github.com/axiomhq/hyperloglog"
 
