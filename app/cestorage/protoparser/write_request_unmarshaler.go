@@ -102,6 +102,7 @@ func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels ma
 		labelsPool = labelsPool[:0]
 	}
 
+	wru.tss = tss[:0]
 	wru.labelsPool = labelsPool
 	wru.fpBuf = fpBuf
 	return nil

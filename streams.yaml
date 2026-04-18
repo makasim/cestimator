@@ -14,8 +14,7 @@ streams:
   - group: ["vm_account_id", "vm_project_id"]
 
   # Track cardinality of tens jobs, with extra labels on the output metrics.
-  - filter: '{job=~"ametric1\\d+"}'
-    group: ["job"]
+  - group: ["job"]
     labels:
       region: 'eu-central-1'
       env: 'production'
