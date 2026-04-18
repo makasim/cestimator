@@ -318,17 +318,3 @@ func (sk *sketch) cloneHLL() *hyperloglog.Sketch {
 
 	return resHLL
 }
-
-// fingerprintLabels returns a byte slice that uniquely identifies a label set.
-// The Prometheus remote write protocol guarantees labels are sorted by name,
-// so no additional sorting is needed.
-func fingerprintLabels(labels []prompb.Label) []byte {
-	var b []byte
-	for _, l := range labels {
-		b = append(b, l.Name...)
-		b = append(b, 0x00)
-		b = append(b, l.Value...)
-		b = append(b, 0x00)
-	}
-	return b
-}
