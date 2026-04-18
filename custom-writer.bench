@@ -1,0 +1,26 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/makasim/cestimator/app/cestorage
+cpu: Apple M1 Pro
+BenchmarkParse_EstimatorGlobal-10    	     518	   2225185 ns/op	  470259 B/op	     373 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     542	   2204943 ns/op	  468719 B/op	     372 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     542	   2215303 ns/op	  468690 B/op	     372 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     542	   2237067 ns/op	  468931 B/op	     373 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     532	   2300149 ns/op	  468407 B/op	     372 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     531	   2237336 ns/op	  470312 B/op	     373 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     460	   2312366 ns/op	  468906 B/op	     372 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     531	   2247131 ns/op	  468975 B/op	     373 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     536	   2240422 ns/op	  468717 B/op	     372 allocs/op
+BenchmarkParse_EstimatorGlobal-10    	     543	   2230652 ns/op	  469950 B/op	     373 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1141	   1062420 ns/op	   80969 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1125	   1054450 ns/op	   83159 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1137	   1057046 ns/op	   79317 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1112	   1058958 ns/op	   79921 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1124	   1043335 ns/op	   80939 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1138	   1099393 ns/op	   79237 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1112	   1050294 ns/op	   80178 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1119	   1047132 ns/op	   80089 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1131	   1048308 ns/op	   80189 B/op	    9503 allocs/op
+BenchmarkParse_EstimatorGroup-10     	    1129	   1058437 ns/op	   81338 B/op	    9503 allocs/op
+PASS
+ok  	github.com/makasim/cestimator/app/cestorage	24.320s
