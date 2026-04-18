@@ -30,7 +30,7 @@ func main() {
 		logger.Fatalf("cannot load config: %v", err)
 	}
 
-	estimators := make([]*Estimator, 0, len(cfg.Streams))
+	estimators := make([]*estimator, 0, len(cfg.Streams))
 	for _, ec := range cfg.Streams {
 		e, err := newEstimator(ec)
 		if err != nil {

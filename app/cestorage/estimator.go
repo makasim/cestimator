@@ -14,7 +14,7 @@ import (
 )
 
 // Estimator tracks cardinality for a single stream configuration.
-type Estimator struct {
+type estimator struct {
 	groupBy     []string          // label names to group by; empty means no grouping
 	extraLabels map[string]string // extra labels added to output metrics
 	filterStr   string
@@ -30,18 +30,18 @@ type Estimator struct {
 	stopCh chan struct{} // closed by Stop to terminate the rotation goroutine
 }
 
-func (e *Estimator) String() string {
+func (e *estimator) String() string {
 	return fmt.Sprintf(
 		"filter: %s; interval: %s; group_by: %v; extra_labels: %v",
 		e.filterStr, e.interval, e.groupBy, e.extraLabels)
 }
 
-func newEstimator(cfg EstimatorConfig) (*Estimator, error) {
+func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 	if cfg.Interval == 0 {
 		cfg.Interval = Duration(time.Minute * 5)
 	}
 
-	e := &Estimator{
+	e := &estimator{
 		groupBy:     cfg.Group,
 		extraLabels: cfg.Labels,
 		filterStr:   cfg.Filter,
@@ -71,12 +71,12 @@ func newEstimator(cfg EstimatorConfig) (*Estimator, error) {
 }
 
 // Stop stops the background rotation goroutine, if any.
-func (e *Estimator) Stop() {
+func (e *estimator) Stop() {
 	close(e.stopCh)
 }
 
 // runRotation resets the sketches on every tick until stopCh is closed.
-func (e *Estimator) runRotation() {
+func (e *estimator) runRotation() {
 	t := time.NewTicker(e.interval / 2)
 	defer t.Stop()
 	for {
@@ -92,7 +92,7 @@ func (e *Estimator) runRotation() {
 // rotate promotes current sketches to previous and starts fresh current sketches.
 // Estimates are computed as the union of previous and current (see estimateSketch /
 // estimateGroup), so cardinality does not drop to zero immediately after rotation.
-func (e *Estimator) rotate() {
+func (e *estimator) rotate() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -110,7 +110,7 @@ func (e *Estimator) rotate() {
 }
 
 // insert adds a time series to the estimator if it matches the configured filter.
-func (e *Estimator) insert(labels []prompb.Label) {
+func (e *estimator) insert(labels []prompb.Label) {
 	if !matchesFilters(labels, e.filters) {
 		return
 	}
@@ -164,7 +164,7 @@ func (e *Estimator) insert(labels []prompb.Label) {
 }
 
 // writeMetrics writes cardinality_estimate metrics to w in Prometheus text format.
-func (e *Estimator) writeMetrics(w io.Writer) {
+func (e *estimator) writeMetrics(w io.Writer) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -209,7 +209,7 @@ func (e *Estimator) writeMetrics(w io.Writer) {
 // estimateSketch returns the cardinality estimate for the union of cur and prev.
 // If prev is nil (no rotation has happened yet, or no previous interval data),
 // only cur is used.  This prevents an abrupt drop to zero right after rotation.
-func (e *Estimator) estimateSketch(cur, prev *hyperloglog.Sketch) uint64 {
+func (e *estimator) estimateSketch(cur, prev *hyperloglog.Sketch) uint64 {
 	if cur == nil && prev == nil {
 		return 0
 	}

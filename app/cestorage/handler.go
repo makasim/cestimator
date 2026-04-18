@@ -28,7 +28,7 @@ var (
 	cardinalityCacheTTL = time.Minute
 )
 
-func requestHandler(estimators []*Estimator) httpserver.RequestHandler {
+func requestHandler(estimators []*estimator) httpserver.RequestHandler {
 	return func(w http.ResponseWriter, r *http.Request) bool {
 		switch r.URL.Path {
 		case "/api/v1/write":
@@ -43,7 +43,7 @@ func requestHandler(estimators []*Estimator) httpserver.RequestHandler {
 	}
 }
 
-func handleCardinalityMetrics(w http.ResponseWriter, _ *http.Request, estimators []*Estimator) {
+func handleCardinalityMetrics(w http.ResponseWriter, _ *http.Request, estimators []*estimator) {
 	startTime := time.Now()
 
 	cardinalityCacheMu.Lock()
@@ -66,7 +66,7 @@ func handleCardinalityMetrics(w http.ResponseWriter, _ *http.Request, estimators
 	cardinalityMetricsBytesTotal.Add(len(responseData))
 }
 
-func handleRemoteWrite(w http.ResponseWriter, r *http.Request, estimators []*Estimator) {
+func handleRemoteWrite(w http.ResponseWriter, r *http.Request, estimators []*estimator) {
 	isVMRemoteWrite := r.Header.Get("Content-Encoding") == "zstd"
 	err := stream.Parse(r.Body, isVMRemoteWrite, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
 		for i := range tss {
