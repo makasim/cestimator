@@ -8,8 +8,8 @@ import (
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/httpserver"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/protoparser/promremotewrite/stream"
 	"github.com/VictoriaMetrics/metrics"
+	"github.com/makasim/cestimator/app/cestorage/protoparser"
 )
 
 var prometheusWriteRequests = metrics.NewCounter(`cestorage_http_requests_total{path="/api/v1/write", protocol="promremotewrite"}`)
@@ -68,7 +68,7 @@ func handleCardinalityMetrics(w http.ResponseWriter, _ *http.Request, estimators
 
 func handleRemoteWrite(w http.ResponseWriter, r *http.Request, estimators []*estimator) {
 	isVMRemoteWrite := r.Header.Get("Content-Encoding") == "zstd"
-	err := stream.Parse(r.Body, isVMRemoteWrite, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+	err := protoparser.Parse(r.Body, isVMRemoteWrite, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
 		for i := range tss {
 			for _, e := range estimators {
 				e.insert(tss[i].Labels)

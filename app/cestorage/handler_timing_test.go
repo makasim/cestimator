@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/makasim/cestimator/app/cestorage/protoparser"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/protoparser/promremotewrite/stream"
 )
 
-func BenchmarkStreamParse_EstimatorGlobal(b *testing.B) {
+func BenchmarkParse_EstimatorGlobal(b *testing.B) {
 	data := buildSnappyEncodedWriteRequest(5_000, 3, 5, 1)
 	e, err := newEstimator(EstimatorConfig{Interval: Duration(time.Hour)})
 	if err != nil {
@@ -25,7 +25,7 @@ func BenchmarkStreamParse_EstimatorGlobal(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		err := stream.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+		err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
 			for i := range tss {
 				for _, est := range estimators {
 					est.insert(tss[i].Labels)
@@ -39,7 +39,7 @@ func BenchmarkStreamParse_EstimatorGlobal(b *testing.B) {
 	}
 }
 
-func BenchmarkStreamParse_EstimatorGroup(b *testing.B) {
+func BenchmarkParse_EstimatorGroup(b *testing.B) {
 	data := buildSnappyEncodedWriteRequest(5_000, 3, 5, 100)
 	e, err := newEstimator(EstimatorConfig{
 		Group:    []string{"groupLabel"},
@@ -54,7 +54,7 @@ func BenchmarkStreamParse_EstimatorGroup(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		err := stream.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+		err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
 			for i := range tss {
 				for _, est := range estimators {
 					est.insert(tss[i].Labels)
