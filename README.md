@@ -30,16 +30,14 @@ streams:
   # Track cardinality grouped by tenant info
   - group: ["vm_account_id", "vm_project_id"]
 
-  # Track cardinality of tens jobs, with extra labels on the output metrics.
-  - filter: '{job=~"1\d+"}'
-    group: ["job"]
+  # Track cardinality of jobs, with extra labels on the output metrics.
+  - group: ["job"]
     labels:
       region: 'eu-central-1'
       env: 'production'
 ```
 
 Fields:
-- `filter` (optional): MetricsQL selector to restrict which time series are counted
 - `group` (optional): list of label names to split cardinality by; each distinct combination gets its own estimate
 - `labels` (optional): extra labels attached to all output metrics for this estimator
 - `interval` (optional): how often to rotate (reset) counters; defaults to `5m`
@@ -53,27 +51,23 @@ go run ./app/cegen/main.go -cardI=100 -cardY=20 -template="foo{instance=\"127.0.
 
 ## Metrics
 
-Cardinality estimates are written to `/metrics` in Prometheus text format.
+Cardinality estimates are exposed at `/cardinality/metrics` in Prometheus text format.
 
-All metrics include `interval`, `filter`, and `group_by_keys` labels. Extra labels from the `labels` config field are appended next (sorted alphabetically). When grouping is configured, a `group_by_values` label holds the comma-separated values for each distinct combination.
+All metrics include `interval`, `group_by_keys`, and `group_by_values` labels. Extra labels from the `labels` config field are inserted between `interval` and `group_by_keys` (sorted alphabetically).
 
-**Without grouping:**
+**Without grouping** (`group_by_keys` and `group_by_values` are `__no_value__`):
 ```
-cardinality_estimate{interval="1h0m0s",filter="",group_by_keys=""} 142300
-```
-
-**With filter and single group:**
-```
-cardinality_estimate{interval="5m0s",filter="{region=\"eu-central-1\"}",group_by_keys="instance",group_by_values="host1:9090"} 312
+cardinality_estimate{interval="1h0m0s",group_by_keys="__no_value__",group_by_values="__no_value__"} 142300
 ```
 
-**With multiple group labels** (one line per distinct label value combination):
+**With grouping** — one summary line (total distinct group count) plus one line per distinct label value combination:
 ```
-cardinality_estimate{interval="5m0s",filter="",group_by_keys="instance,job",group_by_values="host1:9090,prometheus"} 312
-cardinality_estimate{interval="5m0s",filter="",group_by_keys="instance,job",group_by_values="host2:9100,node"} 87
+cardinality_estimate{interval="5m0s",group_by_keys="__no_value__",group_by_values="instance,job"} 2
+cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_values="host1:9090,prometheus"} 312
+cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_values="host2:9100,node"} 87
 ```
 
 **With extra labels:**
 ```
-cardinality_estimate{interval="5m0s",filter="{region=\"eu-central-1\"}",group_by_keys="instance",env="production",region="eu-central-1",group_by_values="host1:9090"} 312
+cardinality_estimate{interval="5m0s",env="production",region="eu-central-1",group_by_keys="job",group_by_values="prometheus"} 312
 ```
