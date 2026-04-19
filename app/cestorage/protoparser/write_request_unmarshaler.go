@@ -2,6 +2,7 @@ package protoparser
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/VictoriaMetrics/easyproto"
@@ -22,7 +23,9 @@ func getWriteRequestUnmarshaler() *writeRequestUnmarshaler {
 	v := wruPool.Get()
 	if v == nil {
 		return &writeRequestUnmarshaler{
-			tss: make([]TimeSerie, 0, 1024),
+			tss:        make([]TimeSerie, 0, 1024),
+			labelsPool: make([]Label, 0, 4096),
+			fpBuf:      make([]byte, 0, 4096),
 		}
 	}
 	return v.(*writeRequestUnmarshaler)
@@ -47,15 +50,13 @@ type writeRequestUnmarshaler struct {
 
 // Reset resets wru, so it could be re-used.
 func (wru *writeRequestUnmarshaler) Reset() {
-	clear(wru.tss)
+	wru.fpBuf = wru.fpBuf[:0]
 	wru.tss = wru.tss[:0]
-
-	clear(wru.labelsPool)
 	wru.labelsPool = wru.labelsPool[:0]
 
 }
 
-func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels map[string]struct{}, callback func(tss []TimeSerie)) error {
+func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels []string, callback func(tss []TimeSerie)) error {
 	wru.Reset()
 
 	var err error
@@ -108,7 +109,7 @@ func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels ma
 	return nil
 }
 
-func (ts *TimeSerie) unmarshalProtobuf(src []byte, groupLabels map[string]struct{}, labelsPool []Label, fpBuf []byte) ([]Label, []byte, error) {
+func (ts *TimeSerie) unmarshalProtobuf(src []byte, groupLabels []string, labelsPool []Label, fpBuf []byte) ([]Label, []byte, error) {
 	// message TimeSeries {
 	//   repeated Label labels   = 1;
 	//   repeated Sample samples = 2;
@@ -144,7 +145,7 @@ func (ts *TimeSerie) unmarshalProtobuf(src []byte, groupLabels map[string]struct
 			fpBuf = append(fpBuf, label.Value...)
 			fpBuf = append(fpBuf, 0x00)
 
-			if _, ok := groupLabels[label.Name]; !ok {
+			if !slices.Contains(groupLabels, label.Name) {
 				labelsPool = labelsPool[:len(labelsPool)-1]
 			}
 		}

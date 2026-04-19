@@ -6,52 +6,23 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/alphadose/haxmap"
 	"github.com/axiomhq/hyperloglog"
+	"github.com/dgryski/go-metro"
 
 	"github.com/makasim/cestimator/app/cestorage/protoparser"
 )
 
-type groupsMap = haxmap.Map[string, *sketch]
-
-func newGroupsMap() *groupsMap {
-	return haxmap.New[string, *sketch]()
-}
-
-// Estimator tracks cardinality for a single stream configuration.
 type estimator struct {
-	groupBy      []string          // label names to group by; empty means no grouping
-	extraLabels  map[string]string // extra labels added to output metrics
-	interval     time.Duration
-	metricPrefix string
-	bucketsNum   int
-	precision    uint8
-	sparse       bool
+	groupBy []string
 
-	sketch     atomic.Pointer[sketch]
-	prevSketch atomic.Pointer[sketch]
-	groups     atomic.Pointer[groupsMap]
-	prevGroups atomic.Pointer[groupsMap]
-
-	stopCh chan struct{}
-}
-
-func (e *estimator) String() string {
-	return fmt.Sprintf(
-		"interval: %s; group_by: %v; extra_labels: %v", e.interval, e.groupBy, e.extraLabels)
+	buckets []*estimatorBucket
 }
 
 func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 	if cfg.Interval == 0 {
 		cfg.Interval = time.Minute * 5
-	}
-
-	bucketsNum := 1
-	if len(cfg.Group) == 0 {
-		bucketsNum = 10
 	}
 
 	metricPrefix := fmt.Sprintf("cardinality_estimate{interval=%q", cfg.Interval)
@@ -67,253 +38,256 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 	}
 
 	e := &estimator{
-		groupBy:      cfg.Group,
-		extraLabels:  cfg.Labels,
-		interval:     cfg.Interval,
-		bucketsNum:   bucketsNum,
-		metricPrefix: metricPrefix,
-		precision:    14,
-		sparse:       true,
-
-		stopCh: make(chan struct{}),
+		groupBy: cfg.Group,
+		buckets: make([]*estimatorBucket, 20),
 	}
 
-	if len(cfg.Group) == 0 {
-		sk, err := e.newSketch()
-		if err != nil {
-			return nil, fmt.Errorf("cannot create HLL sketch for stream %s: %w", e, err)
+	for i := 0; i < len(e.buckets); i++ {
+		eb := &estimatorBucket{
+			groupBy:      cfg.Group,
+			extraLabels:  cfg.Labels,
+			interval:     cfg.Interval,
+			metricPrefix: metricPrefix,
+			precision:    14,
+			sparse:       true,
+
+			stopCh: make(chan struct{}),
 		}
-		e.sketch.Store(sk)
-	} else {
-		e.groups.Store(newGroupsMap())
-		e.prevGroups.Store(newGroupsMap())
-	}
 
-	go e.runRotation()
+		if len(cfg.Group) == 0 {
+			eb.sketch = eb.newSketch()
+		} else {
+			eb.groups = make(map[string]*hyperloglog.Sketch)
+			eb.prevGroups = make(map[string]*hyperloglog.Sketch)
+		}
+
+		go eb.runRotation()
+
+		e.buckets[i] = eb
+	}
 
 	return e, nil
 }
 
+func (e *estimator) stop() {
+	for _, b := range e.buckets {
+		b.stop()
+	}
+}
+
+var keyPool = sync.Pool{}
+
+func getKeySlice() []byte {
+	v0 := keyPool.Get()
+	if v0 == nil {
+		return nil
+	}
+
+	return v0.([]byte)
+}
+
+func putKeySlice(key []byte) {
+	key = key[:0]
+	keyPool.Put(key)
+}
+
+func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
+	bucketsNum := uint64(len(e.buckets))
+
+	key := getKeySlice()
+	defer putKeySlice(key)
+
+	for _, ts := range tss {
+		key = key[:0]
+
+		if len(e.groupBy) == 0 {
+			i := int(ts.Fingerprint % bucketsNum)
+			e.buckets[i].insert(ts, "")
+			continue
+		}
+
+		var hasNonEmptyLabel bool
+		for i, labelName := range e.groupBy {
+			if i > 0 {
+				key = append(key, ',')
+			}
+
+			for _, l := range ts.GroupLabels {
+				if l.Name == labelName {
+					if l.Value != "" {
+						hasNonEmptyLabel = true
+					}
+
+					key = append(key, l.Value...)
+					break
+				}
+			}
+		}
+		// time series does not contribute to this group
+		if !hasNonEmptyLabel {
+			continue
+		}
+
+		i := int(hash(key) % bucketsNum)
+		e.buckets[i].insert(ts, string(key))
+	}
+}
+
+func (e *estimator) writeMetrics(w io.Writer) {
+	res := make(map[string]*hyperloglog.Sketch)
+	resGroups := make(map[string]int)
+	for _, b := range e.buckets {
+		b.writeMetrics(res, resGroups)
+	}
+
+	for name, value := range resGroups {
+		fmt.Fprintf(w, "%s %d\n", name, value)
+	}
+	for name, sk := range res {
+		fmt.Fprintf(w, "%s %d\n", name, sk.Estimate())
+	}
+}
+
+//type groupsMap = haxmap.Map[string, *sketch]
+//
+//func newGroupsMap() *groupsMap {
+//	return haxmap.New[string, *sketch]()
+//}
+
+type estimatorBucket struct {
+	mu sync.Mutex
+
+	groupBy      []string
+	extraLabels  map[string]string
+	interval     time.Duration
+	metricPrefix string
+	precision    uint8
+	sparse       bool
+
+	sketch     *hyperloglog.Sketch
+	prevSketch *hyperloglog.Sketch
+	groups     map[string]*hyperloglog.Sketch
+	prevGroups map[string]*hyperloglog.Sketch
+
+	stopCh chan struct{}
+}
+
+func (eb *estimatorBucket) String() string {
+	return fmt.Sprintf(
+		"interval: %s; group_by: %v; extra_labels: %v", eb.interval, eb.groupBy, eb.extraLabels)
+}
+
 // Stop stops the background rotation goroutine, if any.
-func (e *estimator) Stop() {
-	close(e.stopCh)
+func (eb *estimatorBucket) stop() {
+	close(eb.stopCh)
 }
 
 // runRotation resets the sketches on every tick until stopCh is closed.
-func (e *estimator) runRotation() {
-	t := time.NewTicker(e.interval / 2)
+func (eb *estimatorBucket) runRotation() {
+	t := time.NewTicker(eb.interval / 2)
 	defer t.Stop()
 	for {
 		select {
 		case <-t.C:
-			e.rotate()
-		case <-e.stopCh:
+			eb.rotate()
+		case <-eb.stopCh:
 			return
 		}
 	}
 }
 
-// rotate promotes current sketches to previous and starts fresh current sketches.
-// Estimates are computed as the union of previous and current (see estimateSketch /
-// estimateGroup), so cardinality does not drop to zero immediately after rotation.
-func (e *estimator) rotate() {
-	if len(e.groupBy) == 0 {
-		sk, err := e.newSketch()
-		if err != nil {
-			return
-		}
-		currSK := e.sketch.Load()
-		e.prevSketch.Store(currSK)
-		e.sketch.Store(sk)
+func (eb *estimatorBucket) rotate() {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+
+	if len(eb.groupBy) == 0 {
+		eb.prevSketch = eb.sketch
+		eb.sketch = eb.newSketch()
 		return
 	}
-	currGroup := e.groups.Load()
-	e.prevGroups.Store(currGroup)
-	e.groups.Store(newGroupsMap())
+
+	eb.prevGroups = eb.groups
+	eb.groups = make(map[string]*hyperloglog.Sketch, len(eb.groups))
 }
 
-// insert adds a time series to the estimator if it matches the configured filter.
-func (e *estimator) insert(ts protoparser.TimeSerie) {
-	if len(e.groupBy) == 0 {
-		sk := e.sketch.Load()
-		sk.insert(ts.Fingerprint)
+func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupKey string) {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+
+	if groupKey == "" {
+		eb.sketch.InsertHash(ts.Fingerprint)
 		return
 	}
 
-	var key []byte
-	first := true
-	var hasNonEmptyLabel bool
-	for _, labelName := range e.groupBy {
-		if !first {
-			key = append(key, ',')
-		}
-
-		for _, l := range ts.GroupLabels {
-			if l.Name == labelName {
-				if l.Value != "" {
-					hasNonEmptyLabel = true
-				}
-
-				key = append(key, l.Value...)
-				break
-			}
-		}
-
-		first = false
-	}
-	// time series does not contribute to this group
-	if !hasNonEmptyLabel {
-		return
-	}
-
-	groups := e.groups.Load()
-
-	groupKey := string(key)
-	sk, _ := groups.Get(groupKey)
+	sk := eb.groups[groupKey]
 	if sk == nil {
-		var err error
-		sk, err = e.newSketch()
-		if err != nil {
-			panic(fmt.Sprintf("FATAL: cannot create HLL sketch for stream %s: %s", e, err))
-		}
-		groups.Set(groupKey, sk)
+		sk = eb.newSketch()
+		eb.groups[groupKey] = sk
 	}
-	sk.insert(ts.Fingerprint)
+	sk.InsertHash(ts.Fingerprint)
 }
 
 // writeMetrics writes cardinality_estimate metrics to w in Prometheus text format.
-func (e *estimator) writeMetrics(w io.Writer) {
-	if len(e.groupBy) == 0 {
-		card := e.estimateSketch(e.sketch.Load(), e.prevSketch.Load())
-		fmt.Fprintf(w, "%s,group_by_keys=\"__no_value__\",group_by_values=\"__no_value__\"} %d\n", e.metricPrefix, card)
+func (eb *estimatorBucket) writeMetrics(res map[string]*hyperloglog.Sketch, resGroups map[string]int) {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+
+	if len(eb.groupBy) == 0 {
+		key := eb.metricPrefix + ",group_by_keys=\"__global__\"}"
+		eb.ensureKeySet(res, key)
+		eb.estimateSketch(eb.sketch, eb.prevSketch, res[key])
 		return
 	}
 
-	groupByKey := strings.Join(e.groupBy, ",")
-
-	groups := e.groups.Load()
-	prevGroups := e.prevGroups.Load()
+	groupByKey := strings.Join(eb.groupBy, ",")
 
 	// Collect all group keys from both current and previous intervals.
-	keys := make(map[string]struct{}, groups.Len()+prevGroups.Len())
-	for k := range groups.Keys() {
+	keys := make(map[string]struct{}, len(eb.groups)+len(eb.prevGroups))
+	for k := range eb.groups {
 		keys[k] = struct{}{}
 	}
-	for k := range prevGroups.Keys() {
+	for k := range eb.prevGroups {
 		keys[k] = struct{}{}
 	}
 
-	fmt.Fprintf(w, "%s,group_by_keys=\"__no_value__\",group_by_values=%q} %d\n", e.metricPrefix, groupByKey, len(keys))
+	key := fmt.Sprintf("%s,group_by_keys=\"__group__\",group_by_values=%q}", eb.metricPrefix, groupByKey)
+	resGroups[key] += len(keys)
+
 	for groupByVal := range keys {
-		sk, _ := groups.Get(groupByVal)
-		prevSK, _ := prevGroups.Get(groupByVal)
-
-		card := e.estimateSketch(sk, prevSK)
-		fmt.Fprintf(w, "%s,group_by_keys=%q,group_by_values=%q} %d\n", e.metricPrefix, groupByKey, groupByVal, card)
+		key := fmt.Sprintf("%s,group_by_keys=%q,group_by_values=%q}", eb.metricPrefix, groupByKey, groupByVal)
+		eb.ensureKeySet(res, key)
+		eb.estimateSketch(eb.groups[groupByVal], eb.prevGroups[groupByVal], res[key])
 	}
 }
 
-// estimateSketch returns the cardinality estimate for the union of cur and prev.
-// If prev is nil (no rotation has happened yet, or no previous interval data),
-// only cur is used.  This prevents an abrupt drop to zero right after rotation.
-func (e *estimator) estimateSketch(cur, prev *sketch) uint64 {
-	if cur == nil && prev == nil {
-		return 0
+func (eb *estimatorBucket) ensureKeySet(res map[string]*hyperloglog.Sketch, key string) {
+	if _, ok := res[key]; !ok {
+		res[key] = eb.newSketch()
 	}
-	if prev == nil {
-		return cur.estimate()
-	}
-	if cur == nil {
-		return prev.estimate()
-	}
-	// Merge into a temporary copy so the originals are not mutated.
-	merged := cur.cloneHLL()
-	if err := merged.Merge(prev.cloneHLL()); err != nil {
-		// Merge only fails on precision mismatch; both sketches use precision 14.
-		return cur.estimate()
-	}
-	return merged.Estimate()
 }
 
-func (e *estimator) newSketch() (*sketch, error) {
-	return newSketch(e.bucketsNum, e.precision, e.sparse)
-}
-
-type sketch struct {
-	bucketsNum uint64
-	buckets    []sketchBucket
-}
-
-type sketchBucket struct {
-	mu        sync.Mutex
-	hllSketch hyperloglog.Sketch
-}
-
-func (skb *sketchBucket) insert(fp uint64) {
-	skb.mu.Lock()
-	defer skb.mu.Unlock()
-	skb.hllSketch.InsertHash(fp)
-}
-
-func (skb *sketchBucket) estimate() uint64 {
-	skb.mu.Lock()
-	defer skb.mu.Unlock()
-	return skb.hllSketch.Estimate()
-}
-
-func (skb *sketchBucket) cloneHLL() *hyperloglog.Sketch {
-	skb.mu.Lock()
-	defer skb.mu.Unlock()
-	return skb.hllSketch.Clone()
-}
-
-func newSketch(bucketsNum int, precision uint8, sparse bool) (*sketch, error) {
-	buckets := make([]sketchBucket, bucketsNum)
-
-	for i := range buckets {
-		hllSK, err := hyperloglog.NewSketch(precision, sparse)
-		if err != nil {
-			return nil, err
-		}
-
-		buckets[i] = sketchBucket{
-			hllSketch: *hllSK,
-		}
-	}
-
-	return &sketch{
-		buckets:    buckets,
-		bucketsNum: uint64(bucketsNum),
-	}, nil
-}
-
-func (sk *sketch) insert(fp uint64) {
-	skb := &sk.buckets[fp%sk.bucketsNum]
-	skb.insert(fp)
-}
-
-func (sk *sketch) estimate() uint64 {
-	if sk.bucketsNum == 1 {
-		skb := &sk.buckets[0]
-		return skb.estimate()
-	}
-
-	return sk.cloneHLL().Estimate()
-}
-
-func (sk *sketch) cloneHLL() *hyperloglog.Sketch {
-	skb := &sk.buckets[0]
-	resHLL := skb.cloneHLL()
-	if sk.bucketsNum == 1 {
-		return resHLL
-	}
-
-	for i := 1; i < len(sk.buckets); i++ {
-		skbI := &sk.buckets[i]
-		if err := resHLL.Merge(skbI.cloneHLL()); err != nil {
+func (eb *estimatorBucket) estimateSketch(cur, prev, res *hyperloglog.Sketch) {
+	if cur != nil {
+		if err := res.Merge(cur); err != nil {
 			panic(err)
 		}
 	}
+	if prev != nil {
+		if err := res.Merge(prev); err != nil {
+			panic(err)
+		}
+	}
+}
 
-	return resHLL
+func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
+	sk, err := hyperloglog.NewSketch(eb.precision, eb.sparse)
+	if err != nil {
+		panic(fmt.Sprintf("cannot create HLL sketch with precision=%d and sparse=%v: %s", eb.precision, eb.sparse, err))
+	}
+
+	return sk
+}
+
+func hash(v []byte) uint64 {
+	return metro.Hash64(v, 1337)
 }

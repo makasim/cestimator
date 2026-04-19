@@ -18,7 +18,7 @@ var maxInsertRequestSize = flagutil.NewBytes("maxInsertRequestSize", 32*1024*102
 // Parse parses Prometheus remote_write message from reader and calls callback for the parsed timeseries.
 //
 // callback shouldn't hold tss after returning.
-func Parse(r io.Reader, groupLabels map[string]struct{}, callback func(tss []TimeSerie)) error {
+func Parse(r io.Reader, groupLabels []string, callback func(tss []TimeSerie)) error {
 	startTime := fasttime.UnixTimestamp()
 
 	readCalls.Inc()
@@ -32,7 +32,7 @@ func Parse(r io.Reader, groupLabels map[string]struct{}, callback func(tss []Tim
 	return nil
 }
 
-func parseRequestBody(data []byte, groupLabels map[string]struct{}, callback func(tss []TimeSerie)) error {
+func parseRequestBody(data []byte, groupLabels []string, callback func(tss []TimeSerie)) error {
 	// Synchronously process the request in order to properly return errors to Parse caller,
 	// so it could properly return HTTP 503 status code in response.
 	// See https://github.com/VictoriaMetrics/VictoriaMetrics/issues/896
