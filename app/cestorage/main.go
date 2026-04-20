@@ -61,7 +61,7 @@ func main() {
 		logger.Errorf("cannot stop http server: %s", err)
 	}
 	for _, e := range estimators {
-		e.Stop()
+		e.stop()
 	}
 	logger.Infof("shutting down cestorage")
 }

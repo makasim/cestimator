@@ -28,11 +28,16 @@ var (
 )
 
 func requestHandler(estimators []*estimator) httpserver.RequestHandler {
-	groupLabels := make(map[string]struct{})
+	groupLabelsMap := make(map[string]struct{})
 	for _, e := range estimators {
 		for _, l := range e.groupBy {
-			groupLabels[l] = struct{}{}
+			groupLabelsMap[l] = struct{}{}
 		}
+	}
+
+	groupLabels := make([]string, 0, len(groupLabelsMap))
+	for k := range groupLabelsMap {
+		groupLabels = append(groupLabels, k)
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) bool {
@@ -72,13 +77,15 @@ func handleCardinalityMetrics(w http.ResponseWriter, _ *http.Request, estimators
 	cardinalityMetricsBytesTotal.Add(len(responseData))
 }
 
-func handleRemoteWrite(w http.ResponseWriter, r *http.Request, groupLabels map[string]struct{}, estimators []*estimator) {
+func handleRemoteWrite(w http.ResponseWriter, r *http.Request, groupLabels []string, estimators []*estimator) {
 	err := protoparser.Parse(r.Body, groupLabels, func(tss []protoparser.TimeSerie) {
-		for i := range tss {
-			for _, e := range estimators {
-				e.insert(tss[i])
-			}
+		//var wg sync.WaitGroup
+		for _, e := range estimators {
+			//wg.Go(func() {
+				e.insertMany(tss)
+			//})
 		}
+		//wg.Wait()
 		rowsInserted.Add(len(tss))
 	})
 	if err != nil {

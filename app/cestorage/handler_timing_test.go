@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,19 +20,21 @@ func BenchmarkParse_EstimatorGlobal(b *testing.B) {
 	if err != nil {
 		b.Fatalf("newEstimator: %v", err)
 	}
-	defer e.Stop()
+	defer e.stop()
 	estimators := []*estimator{e}
-	groupLabels := make(map[string]struct{})
+	groupLabels := make([]string, 0)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
 		err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
-			for i := range tss {
-				for _, est := range estimators {
-					est.insert(tss[i])
-				}
+			var wg sync.WaitGroup
+			for _, e := range estimators {
+				wg.Go(func() {
+					e.insertMany(tss)
+				})
 			}
+			wg.Wait()
 		})
 		if err != nil {
 			b.Fatalf("stream.Parse: %v", err)
@@ -48,21 +51,21 @@ func BenchmarkParse_EstimatorGroup(b *testing.B) {
 	if err != nil {
 		b.Fatalf("newEstimator: %v", err)
 	}
-	defer e.Stop()
+	defer e.stop()
 	estimators := []*estimator{e}
-	groupLabels := map[string]struct{}{
-		"groupLabel": {},
-	}
+	groupLabels := []string{"groupLabel"}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
 		err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
-			for i := range tss {
-				for _, est := range estimators {
-					est.insert(tss[i])
-				}
+			var wg sync.WaitGroup
+			for _, e := range estimators {
+				wg.Go(func() {
+					e.insertMany(tss)
+				})
 			}
+			wg.Wait()
 		})
 		if err != nil {
 			b.Fatalf("stream.Parse: %v", err)
