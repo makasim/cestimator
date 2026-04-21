@@ -1,0 +1,66 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/makasim/cestimator/app/cestorage
+cpu: Apple M1 Pro
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  486944	      2299 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  519906	      2362 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  468729	      2365 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  505543	      2365 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  519612	      2344 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  519373	      2480 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  481947	      2441 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  501178	      2396 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  499389	      2383 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/NoPrev-10         	  512170	      2350 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  329302	      3654 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  327880	      3670 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  326155	      3637 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  331344	      3667 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  329247	      3645 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  328957	      3681 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  326929	      3621 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  330747	      3614 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  329925	      3648 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_NoGroup/WithPrev-10       	  326682	      3679 ns/op	    1504 B/op	      12 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   33928	     35349 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   32685	     36412 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   32965	     36226 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   33618	     35271 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   33962	     36139 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   32670	     37543 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   32188	     36188 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   33622	     36029 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   34051	     35641 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/NoPrev-10        	   33326	     36313 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   26526	     44446 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   26708	     45248 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   26740	     44438 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   26906	     45063 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   27139	     44609 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   27040	     45680 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   26842	     44268 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   26715	     45409 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   26584	     45328 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group100/WithPrev-10      	   26728	     45514 ns/op	    6991 B/op	     197 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     528	   2062903 ns/op	    5835 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     590	   2002227 ns/op	    5832 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     613	   1983900 ns/op	    5834 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     609	   1943797 ns/op	    5832 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     621	   1945552 ns/op	    5832 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     619	   1985194 ns/op	    5832 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     612	   1961323 ns/op	    5832 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     624	   1941138 ns/op	    5832 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     614	   1956945 ns/op	    5834 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/NoPrev-10        	     606	   1938846 ns/op	    5833 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     463	   2582841 ns/op	    5838 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     465	   2640858 ns/op	    5835 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     452	   2598744 ns/op	    5836 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     452	   2606778 ns/op	    5838 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     460	   2641946 ns/op	    5836 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     444	   2605388 ns/op	    5835 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     428	   2685697 ns/op	    5840 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     433	   2622463 ns/op	    5838 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     446	   2628401 ns/op	    5838 B/op	     181 allocs/op
+BenchmarkWriteMetrics_Group10k/WithPrev-10      	     432	   2613558 ns/op	    5836 B/op	     181 allocs/op
+PASS
+ok  	github.com/makasim/cestimator/app/cestorage	86.749s
