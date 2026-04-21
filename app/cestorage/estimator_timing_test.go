@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
+	"github.com/makasim/cestimator/app/cestorage/protoparser"
 )
 
 func BenchmarkWriteMetrics_NoGroup(b *testing.B) {
 	b.Run("NoPrev", func(b *testing.B) {
-		e, err := newEstimator(EstimatorConfig{Interval: Duration(time.Hour)})
+		e, err := newEstimator(EstimatorConfig{Interval: time.Hour})
 		if err != nil {
 			b.Fatalf("newEstimator: %v", err)
 		}
@@ -26,7 +26,7 @@ func BenchmarkWriteMetrics_NoGroup(b *testing.B) {
 	})
 
 	b.Run("WithPrev", func(b *testing.B) {
-		e, err := newEstimator(EstimatorConfig{Interval: Duration(time.Hour)})
+		e, err := newEstimator(EstimatorConfig{Interval: time.Hour})
 		if err != nil {
 			b.Fatalf("newEstimator: %v", err)
 		}
@@ -47,7 +47,7 @@ func BenchmarkWriteMetrics_Group100(b *testing.B) {
 	b.Run("NoPrev", func(b *testing.B) {
 		e, err := newEstimator(EstimatorConfig{
 			Group:    []string{"groupLabel"},
-			Interval: Duration(time.Hour),
+			Interval: time.Hour,
 		})
 		if err != nil {
 			b.Fatalf("newEstimator: %v", err)
@@ -65,7 +65,7 @@ func BenchmarkWriteMetrics_Group100(b *testing.B) {
 	b.Run("WithPrev", func(b *testing.B) {
 		e, err := newEstimator(EstimatorConfig{
 			Group:    []string{"groupLabel"},
-			Interval: Duration(time.Hour),
+			Interval: time.Hour,
 		})
 		if err != nil {
 			b.Fatalf("newEstimator: %v", err)
@@ -87,7 +87,7 @@ func BenchmarkWriteMetrics_Group10k(b *testing.B) {
 	b.Run("NoPrev", func(b *testing.B) {
 		e, err := newEstimator(EstimatorConfig{
 			Group:    []string{"groupLabel"},
-			Interval: Duration(time.Hour),
+			Interval: time.Hour,
 		})
 		if err != nil {
 			b.Fatalf("newEstimator: %v", err)
@@ -105,7 +105,7 @@ func BenchmarkWriteMetrics_Group10k(b *testing.B) {
 	b.Run("WithPrev", func(b *testing.B) {
 		e, err := newEstimator(EstimatorConfig{
 			Group:    []string{"groupLabel"},
-			Interval: Duration(time.Hour),
+			Interval: time.Hour,
 		})
 		if err != nil {
 			b.Fatalf("newEstimator: %v", err)
@@ -127,17 +127,16 @@ func BenchmarkWriteMetrics_Group10k(b *testing.B) {
 // When groupsNum > 0 each series gets a "groupLabel" cycling through groupsNum values.
 func insertSeriesIntoEstimator(e *estimator, numSeries, groupsNum int) {
 	for i := 0; i < numSeries; i++ {
-		labels := []prompb.Label{
-			{Name: "label00", Value: fmt.Sprintf("val%07d", i)},
-			{Name: "label01", Value: fmt.Sprintf("val%07d", i)},
-			{Name: "label02", Value: fmt.Sprintf("val%07d", i)},
-		}
+		var labels []protoparser.Label
 		if groupsNum > 0 {
-			labels = append(labels, prompb.Label{
+			labels = append(labels, protoparser.Label{
 				Name:  "groupLabel",
 				Value: fmt.Sprintf("%d", i%groupsNum),
 			})
 		}
-		e.insert(labels)
+		e.insert(protoparser.TimeSerie{
+			GroupLabels: labels,
+			Fingerprint: uint64(i),
+		})
 	}
 }

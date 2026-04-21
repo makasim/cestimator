@@ -27,13 +27,12 @@ func BenchmarkParse_EstimatorGlobal(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+			err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
 				for i := range tss {
 					for _, est := range estimators {
 						est.insert(tss[i])
 					}
 				}
-				return nil
 			})
 			if err != nil {
 				b.Errorf("stream.Parse: %v", err)
@@ -61,13 +60,12 @@ func BenchmarkParse_EstimatorGroup(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+			err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
 				for i := range tss {
 					for _, est := range estimators {
 						est.insert(tss[i])
 					}
 				}
-				return nil
 			})
 			if err != nil {
 				b.Errorf("stream.Parse: %v", err)
