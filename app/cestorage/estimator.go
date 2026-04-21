@@ -136,10 +136,9 @@ func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
 
 func (e *estimator) writeMetrics(w io.Writer) {
 	formatBuf := make([]byte, 0, 1024)
+	eb0 := e.buckets[0]
 
 	if len(e.groupBy) == 0 {
-		eb0 := e.buckets[0]
-
 		resSK := eb0.newSketch()
 		for _, eb := range e.buckets {
 			eb.writeNoGroupMetric(resSK)
@@ -153,9 +152,20 @@ func (e *estimator) writeMetrics(w io.Writer) {
 		return
 	}
 
+	keys := 0
+	groupByKey := strings.Join(eb0.groupBy, ",")
 	for _, b := range e.buckets {
-		b.writeGroupMetrics(w, formatBuf)
+		keys += b.writeGroupMetrics(w, formatBuf, groupByKey)
 	}
+	
+	formatBuf = formatBuf[:0]
+	formatBuf = append(formatBuf, eb0.metricPrefix...)
+	formatBuf = append(formatBuf, `,group_by_keys="__group__",group_by_values="`...)
+	formatBuf = append(formatBuf, groupByKey...)
+	formatBuf = append(formatBuf, `"} `...)
+	formatBuf = strconv.AppendInt(formatBuf, int64(keys), 10)
+	formatBuf = append(formatBuf, "\n"...)
+	w.Write(formatBuf)
 }
 
 //type groupsMap = haxmap.Map[string, *sketch]
@@ -245,11 +255,9 @@ func (eb *estimatorBucket) writeNoGroupMetric(res *hyperloglog.Sketch) {
 	return
 }
 
-func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte) {
+func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, groupByKey string) int {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-
-	groupByKey := strings.Join(eb.groupBy, ",")
 
 	res := eb.newSketch()
 	keys := len(eb.groupBy)
@@ -291,7 +299,7 @@ func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte) {
 		keys++
 	}
 
-	fmt.Fprintf(w, "%s,group_by_keys=\"__group__\",group_by_values=%q} %d\n", eb.metricPrefix, groupByKey, keys)
+	return keys
 }
 
 func (eb *estimatorBucket) ensureKeySet(res map[string]*hyperloglog.Sketch, key string) {
