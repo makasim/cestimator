@@ -157,7 +157,7 @@ func (e *estimator) writeMetrics(w io.Writer) {
 	for _, b := range e.buckets {
 		keys += b.writeGroupMetrics(w, formatBuf, groupByKey)
 	}
-	
+
 	formatBuf = formatBuf[:0]
 	formatBuf = append(formatBuf, eb0.metricPrefix...)
 	formatBuf = append(formatBuf, `,group_by_keys="__group__",group_by_values="`...)
@@ -260,7 +260,7 @@ func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, grou
 	defer eb.mu.Unlock()
 
 	res := eb.newSketch()
-	keys := len(eb.groupBy)
+	keys := len(eb.groups)
 	for groupByVal := range eb.groups {
 		res.Reset()
 		formatBuf = formatBuf[:0]
