@@ -2,6 +2,8 @@ module github.com/makasim/cestimator
 
 go 1.26.2
 
+replace github.com/axiomhq/hyperloglog => github.com/makasim/hyperloglog v0.0.0-reuse-memory
+
 require (
 	github.com/VictoriaMetrics/VictoriaMetrics v1.140.0
 	github.com/VictoriaMetrics/easyproto v1.2.0

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -134,17 +135,26 @@ func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
 }
 
 func (e *estimator) writeMetrics(w io.Writer) {
-	res := make(map[string]*hyperloglog.Sketch)
-	resGroups := make(map[string]int)
-	for _, b := range e.buckets {
-		b.writeMetrics(res, resGroups)
+	formatBuf := make([]byte, 0, 1024)
+
+	if len(e.groupBy) == 0 {
+		eb0 := e.buckets[0]
+
+		resSK := eb0.newSketch()
+		for _, eb := range e.buckets {
+			eb.writeNoGroupMetric(resSK)
+		}
+
+		formatBuf = append(formatBuf, eb0.metricPrefix...)
+		formatBuf = append(formatBuf, `,group_by_keys="__global__"} `...)
+		formatBuf = strconv.AppendUint(formatBuf, resSK.Estimate(), 10)
+		formatBuf = append(formatBuf, "\n"...)
+		w.Write(formatBuf)
+		return
 	}
 
-	for name, value := range resGroups {
-		fmt.Fprintf(w, "%s %d\n", name, value)
-	}
-	for name, sk := range res {
-		fmt.Fprintf(w, "%s %d\n", name, sk.Estimate())
+	for _, b := range e.buckets {
+		b.writeGroupMetrics(w, formatBuf)
 	}
 }
 
@@ -227,37 +237,61 @@ func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupKey string) {
 	sk.InsertHash(ts.Fingerprint)
 }
 
-// writeMetrics writes cardinality_estimate metrics to w in Prometheus text format.
-func (eb *estimatorBucket) writeMetrics(res map[string]*hyperloglog.Sketch, resGroups map[string]int) {
+func (eb *estimatorBucket) writeNoGroupMetric(res *hyperloglog.Sketch) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
-	if len(eb.groupBy) == 0 {
-		key := eb.metricPrefix + ",group_by_keys=\"__global__\"}"
-		eb.ensureKeySet(res, key)
-		eb.estimateSketch(eb.sketch, eb.prevSketch, res[key])
-		return
-	}
+	eb.estimateSketch(eb.sketch, eb.prevSketch, res)
+	return
+}
+
+func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte) {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
 
 	groupByKey := strings.Join(eb.groupBy, ",")
 
-	// Collect all group keys from both current and previous intervals.
-	keys := make(map[string]struct{}, len(eb.groups)+len(eb.prevGroups))
-	for k := range eb.groups {
-		keys[k] = struct{}{}
-	}
-	for k := range eb.prevGroups {
-		keys[k] = struct{}{}
+	res := eb.newSketch()
+	keys := len(eb.groupBy)
+	for groupByVal := range eb.groups {
+		res.Reset()
+		formatBuf = formatBuf[:0]
+
+		eb.estimateSketch(eb.groups[groupByVal], eb.prevGroups[groupByVal], res)
+		formatBuf = append(formatBuf, eb.metricPrefix...)
+		formatBuf = append(formatBuf, `,group_by_keys="`...)
+		formatBuf = append(formatBuf, groupByKey...)
+		formatBuf = append(formatBuf, `",group_by_values="`...)
+		formatBuf = append(formatBuf, groupByVal...)
+		formatBuf = append(formatBuf, `"} `...)
+		formatBuf = strconv.AppendUint(formatBuf, res.Estimate(), 10)
+		formatBuf = append(formatBuf, "\n"...)
+		w.Write(formatBuf)
 	}
 
-	key := fmt.Sprintf("%s,group_by_keys=\"__group__\",group_by_values=%q}", eb.metricPrefix, groupByKey)
-	resGroups[key] += len(keys)
+	for groupByVal := range eb.prevGroups {
+		if _, ok := eb.groups[groupByVal]; ok {
+			continue
+		}
 
-	for groupByVal := range keys {
-		key := fmt.Sprintf("%s,group_by_keys=%q,group_by_values=%q}", eb.metricPrefix, groupByKey, groupByVal)
-		eb.ensureKeySet(res, key)
-		eb.estimateSketch(eb.groups[groupByVal], eb.prevGroups[groupByVal], res[key])
+		res.Reset()
+		formatBuf = formatBuf[:0]
+
+		eb.estimateSketch(nil, eb.prevGroups[groupByVal], res)
+		formatBuf = append(formatBuf, eb.metricPrefix...)
+		formatBuf = append(formatBuf, `,group_by_keys="`...)
+		formatBuf = append(formatBuf, groupByKey...)
+		formatBuf = append(formatBuf, `",group_by_values="`...)
+		formatBuf = append(formatBuf, groupByVal...)
+		formatBuf = append(formatBuf, `"} `...)
+		formatBuf = strconv.AppendUint(formatBuf, res.Estimate(), 10)
+		formatBuf = append(formatBuf, "\n"...)
+		w.Write(formatBuf)
+
+		keys++
 	}
+
+	fmt.Fprintf(w, "%s,group_by_keys=\"__group__\",group_by_values=%q} %d\n", eb.metricPrefix, groupByKey, keys)
 }
 
 func (eb *estimatorBucket) ensureKeySet(res map[string]*hyperloglog.Sketch, key string) {
