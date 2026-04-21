@@ -24,19 +24,21 @@ func BenchmarkParse_EstimatorGlobal(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for b.Loop() {
-		err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
-			for i := range tss {
-				for _, est := range estimators {
-					est.insert(tss[i].Labels)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+				for i := range tss {
+					for _, est := range estimators {
+						est.insert(tss[i].Labels)
+					}
 				}
+				return nil
+			})
+			if err != nil {
+				b.Errorf("stream.Parse: %v", err)
 			}
-			return nil
-		})
-		if err != nil {
-			b.Fatalf("stream.Parse: %v", err)
 		}
-	}
+	})
 }
 
 func BenchmarkParse_EstimatorGroup(b *testing.B) {
@@ -53,19 +55,21 @@ func BenchmarkParse_EstimatorGroup(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for b.Loop() {
-		err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
-			for i := range tss {
-				for _, est := range estimators {
-					est.insert(tss[i].Labels)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			err := protoparser.Parse(bytes.NewReader(data), false, func(tss []prompb.TimeSeries, _ []prompb.MetricMetadata) error {
+				for i := range tss {
+					for _, est := range estimators {
+						est.insert(tss[i].Labels)
+					}
 				}
+				return nil
+			})
+			if err != nil {
+				b.Errorf("stream.Parse: %v", err)
 			}
-			return nil
-		})
-		if err != nil {
-			b.Fatalf("stream.Parse: %v", err)
 		}
-	}
+	})
 }
 
 // buildSnappyEncodedWriteRequest builds a snappy-encoded protobuf WriteRequest
