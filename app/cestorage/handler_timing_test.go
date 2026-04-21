@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -26,20 +25,18 @@ func BenchmarkParse_EstimatorGlobal(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for b.Loop() {
-		err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
-			var wg sync.WaitGroup
-			for _, e := range estimators {
-				wg.Go(func() {
-					e.insertMany(tss)
-				})
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
+				for _, est := range estimators {
+					est.insertMany(tss)
+				}
+			})
+			if err != nil {
+				b.Errorf("stream.Parse: %v", err)
 			}
-			wg.Wait()
-		})
-		if err != nil {
-			b.Fatalf("stream.Parse: %v", err)
 		}
-	}
+	})
 }
 
 func BenchmarkParse_EstimatorGroup(b *testing.B) {
@@ -57,20 +54,18 @@ func BenchmarkParse_EstimatorGroup(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for b.Loop() {
-		err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
-			var wg sync.WaitGroup
-			for _, e := range estimators {
-				wg.Go(func() {
-					e.insertMany(tss)
-				})
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			err := protoparser.Parse(bytes.NewReader(data), groupLabels, func(tss []protoparser.TimeSerie) {
+				for _, est := range estimators {
+					est.insertMany(tss)
+				}
+			})
+			if err != nil {
+				b.Errorf("stream.Parse: %v", err)
 			}
-			wg.Wait()
-		})
-		if err != nil {
-			b.Fatalf("stream.Parse: %v", err)
 		}
-	}
+	})
 }
 
 // buildSnappyEncodedWriteRequest builds a snappy-encoded protobuf WriteRequest
