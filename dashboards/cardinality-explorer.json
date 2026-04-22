@@ -21,6 +21,19 @@
   "links": [],
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 4,
+      "panels": [],
+      "title": "Row title",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "${ds}"
@@ -86,7 +99,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 1,
       "options": {
@@ -187,7 +200,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 1
       },
       "id": 3,
       "options": {
@@ -221,6 +234,20 @@
       ],
       "title": "Group Keys Cardinality",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "id": 5,
+      "panels": [],
+      "repeat": "group_by_keys",
+      "title": "Group: $group_by_keys",
+      "type": "row"
     },
     {
       "datasource": {
@@ -288,7 +315,7 @@
         "h": 15,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 12
       },
       "id": 2,
       "options": {
@@ -314,18 +341,18 @@
             "uid": "${ds}"
           },
           "editorMode": "code",
-          "expr": "topk(10, max(cardinality_estimate{job=~\"$job\",instance=~\"$instance\",interval=~\"$interval\",group_by_keys=~\"$group_by_keys\",group_by_values=~\"$group_by_values\"}) without (job,instance))",
+          "expr": "topk(10, max(cardinality_estimate{job=~\"$job\",instance=~\"$instance\",interval=~\"$interval\",group_by_keys=~\"$group_by_keys\",group_by_keys!=\"__global__\",group_by_keys!=\"__group__\",group_by_values=~\"$group_by_values\"}) without (job,instance))",
           "legendFormat": "{{group_by_keys}}: {{group_by_values}} ({{interval}})",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Group Cardinality Top 10",
+      "title": " Top 10 Cardinality of $group_by_keys",
       "type": "timeseries"
     }
   ],
   "preload": false,
-  "refresh": "10s",
+  "refresh": "",
   "schemaVersion": 42,
   "tags": [],
   "templating": {
@@ -343,13 +370,12 @@
         "type": "datasource"
       },
       {
+        "allValue": ".*",
         "allowCustomValue": false,
         "current": {
-          "text": [
-            "cardinality-explorer"
-          ],
+          "text": "All",
           "value": [
-            "cardinality-explorer"
+            "$__all"
           ]
         },
         "datasource": {
@@ -372,13 +398,12 @@
         "type": "query"
       },
       {
+        "allValue": ".*",
         "allowCustomValue": false,
         "current": {
-          "text": [
-            "192.168.50.102:8490"
-          ],
+          "text": "All",
           "value": [
-            "192.168.50.102:8490"
+            "$__all"
           ]
         },
         "datasource": {
@@ -402,13 +427,14 @@
         "type": "query"
       },
       {
+        "allValue": ".*",
         "allowCustomValue": false,
         "current": {
           "text": [
-            "5m0s"
+            "All"
           ],
           "value": [
-            "5m0s"
+            "$__all"
           ]
         },
         "datasource": {
@@ -431,6 +457,7 @@
         "type": "query"
       },
       {
+        "allValue": ".*",
         "allowCustomValue": false,
         "current": {
           "text": "All",
@@ -485,13 +512,13 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "utc",
   "title": "Cardinality Explorer",
   "uid": "mktd5h8",
-  "version": 8,
+  "version": 11,
   "weekStart": ""
 }

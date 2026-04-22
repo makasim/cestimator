@@ -1132,8 +1132,8 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "prometheus",
-          "value": "P1809F7CD0C75ACF3"
+          "text": "sandbox-monitoring",
+          "value": "PB894574A363DF0AF"
         },
         "name": "ds",
         "options": [],
@@ -1165,7 +1165,7 @@
           "query": "label_values(vm_app_version{version=~\"^cestimator.*\"},job)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
         "regex": "",
         "regexApplyTo": "value",
         "type": "query"
@@ -1193,7 +1193,7 @@
           "query": "label_values(vm_app_version{job=~\"$job\", version=~\"^cestimator.*\"},instance)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
-        "refresh": 1,
+        "refresh": 2,
         "regex": "",
         "regexApplyTo": "value",
         "type": "query"
@@ -1201,13 +1201,13 @@
     ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-24h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "utc",
   "title": "cestimator",
   "uid": "mkv22l4",
-  "version": 8,
+  "version": 14,
   "weekStart": ""
 }
