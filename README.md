@@ -55,14 +55,14 @@ Cardinality estimates are exposed at `/cardinality/metrics` in Prometheus text f
 
 All metrics include `interval`, `group_by_keys`, and `group_by_values` labels. Extra labels from the `labels` config field are inserted between `interval` and `group_by_keys` (sorted alphabetically).
 
-**Without grouping** (`group_by_keys` and `group_by_values` are `__no_value__`):
+**Without grouping** (`group_by_keys` is `__global` and `group_by_values` is not set):
 ```
-cardinality_estimate{interval="1h0m0s",group_by_keys="__no_value__",group_by_values="__no_value__"} 142300
+cardinality_estimate{interval="1h0m0s",group_by_keys="__global__"} 142300
 ```
 
 **With grouping** — one summary line (total distinct group count) plus one line per distinct label value combination:
 ```
-cardinality_estimate{interval="5m0s",group_by_keys="__no_value__",group_by_values="instance,job"} 2
+cardinality_estimate{interval="5m0s",group_by_keys="__group__",group_by_values="instance,job"} 2
 cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_values="host1:9090,prometheus"} 312
 cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_values="host2:9100,node"} 87
 ```
