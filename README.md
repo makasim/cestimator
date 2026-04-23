@@ -71,3 +71,9 @@ cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_value
 ```
 cardinality_estimate{interval="5m0s",env="production",region="eu-central-1",group_by_keys="job",group_by_values="prometheus"} 312
 ```
+
+## Dashboard
+
+There are Grafana dashboards available in `dashboards` directory:
+
+<img width="1512" height="862" alt="Screenshot 2026-04-23 at 09 47 38" src="https://github.com/user-attachments/assets/2bd6a930-1eb5-40ef-8006-8196c1c12397" />
