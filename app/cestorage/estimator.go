@@ -9,11 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/axiomhq/hyperloglog"
 	"github.com/dgryski/go-metro"
 
 	"github.com/makasim/cestimator/app/cestorage/protoparser"
 )
+
+var fingerprintsInserted = metrics.NewCounter(`cestimator_fingerprints_inserted`)
 
 type estimator struct {
 	groupBy []string
@@ -99,39 +102,43 @@ func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
 	defer putKeySlice(key)
 
 	for _, ts := range tss {
-		key = key[:0]
-
-		if len(e.groupBy) == 0 {
-			i := int(ts.Fingerprint % bucketsNum)
-			e.buckets[i].insert(ts, "")
-			continue
-		}
-
-		var hasNonEmptyLabel bool
-		for i, labelName := range e.groupBy {
-			if i > 0 {
-				key = append(key, ',')
+		for _, fp := range ts.Fingerprints {
+			if len(e.groupBy) == 0 {
+				i := int(fp % bucketsNum)
+				e.buckets[i].insert(fp, "")
+				fingerprintsInserted.Inc()
+				continue
 			}
 
-			for _, l := range ts.GroupLabels {
-				if l.Name == labelName {
-					if l.Value != "" {
-						hasNonEmptyLabel = true
-					}
+			key = key[:0]
+			var hasNonEmptyLabel bool
+			for i, labelName := range e.groupBy {
+				if i > 0 {
+					key = append(key, ',')
+				}
 
-					key = append(key, l.Value...)
-					break
+				for _, l := range ts.GroupLabels {
+					if l.Name == labelName {
+						if l.Value != "" {
+							hasNonEmptyLabel = true
+						}
+
+						key = append(key, l.Value...)
+						break
+					}
 				}
 			}
-		}
-		// time series does not contribute to this group
-		if !hasNonEmptyLabel {
-			continue
-		}
+			// time series does not contribute to this group
+			if !hasNonEmptyLabel {
+				continue
+			}
 
-		i := int(hash(key) % bucketsNum)
-		e.buckets[i].insert(ts, string(key))
+			i := int(hash(key) % bucketsNum)
+			e.buckets[i].insert(fp, string(key))
+			fingerprintsInserted.Inc()
+		}
 	}
+
 }
 
 func (e *estimator) writeMetrics(w io.Writer) {
@@ -230,12 +237,12 @@ func (eb *estimatorBucket) rotate() {
 	eb.groups = make(map[string]*hyperloglog.Sketch, len(eb.groups))
 }
 
-func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupKey string) {
+func (eb *estimatorBucket) insert(fp uint64, groupKey string) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
 	if groupKey == "" {
-		eb.sketch.InsertHash(ts.Fingerprint)
+		eb.sketch.InsertHash(fp)
 		return
 	}
 
@@ -244,7 +251,7 @@ func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupKey string) {
 		sk = eb.newSketch()
 		eb.groups[groupKey] = sk
 	}
-	sk.InsertHash(ts.Fingerprint)
+	sk.InsertHash(fp)
 }
 
 func (eb *estimatorBucket) writeNoGroupMetric(res *hyperloglog.Sketch) {

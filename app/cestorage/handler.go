@@ -58,14 +58,14 @@ func handleCardinalityMetrics(w http.ResponseWriter, _ *http.Request, estimators
 	startTime := time.Now()
 
 	cardinalityCacheMu.Lock()
-	if time.Since(cardinalityCacheAt) >= cardinalityCacheTTL {
-		plain := bytes.NewBuffer(cardinalityCache[:0])
-		for _, e := range estimators {
-			e.writeMetrics(plain)
-		}
-		cardinalityCache = plain.Bytes()
-		cardinalityCacheAt = time.Now()
+	//if time.Since(cardinalityCacheAt) >= cardinalityCacheTTL {
+	plain := bytes.NewBuffer(cardinalityCache[:0])
+	for _, e := range estimators {
+		e.writeMetrics(plain)
 	}
+	cardinalityCache = plain.Bytes()
+	cardinalityCacheAt = time.Now()
+	//}
 	responseData := cardinalityCache
 	cardinalityCacheMu.Unlock()
 
@@ -82,7 +82,7 @@ func handleRemoteWrite(w http.ResponseWriter, r *http.Request, groupLabels []str
 		//var wg sync.WaitGroup
 		for _, e := range estimators {
 			//wg.Go(func() {
-				e.insertMany(tss)
+			e.insertMany(tss)
 			//})
 		}
 		//wg.Wait()
