@@ -30,7 +30,7 @@
       },
       "id": 4,
       "panels": [],
-      "title": "Row title",
+      "title": "Summary",
       "type": "row"
     },
     {
@@ -618,6 +618,6 @@
   "timezone": "utc",
   "title": "Cardinality Explorer",
   "uid": "mktd5h8",
-  "version": 27,
+  "version": 28,
   "weekStart": ""
 }
