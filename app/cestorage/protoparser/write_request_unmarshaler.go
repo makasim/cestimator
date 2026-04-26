@@ -2,6 +2,7 @@ package protoparser
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 
@@ -10,8 +11,8 @@ import (
 )
 
 type TimeSerie struct {
-	GroupLabels []Label
-	Fingerprint uint64
+	GroupLabels  []Label
+	Fingerprints []uint64
 }
 
 type Label struct {
@@ -90,6 +91,7 @@ func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels []
 			}
 			tss = tss[:len(tss)+1]
 			ts := &tss[len(tss)-1]
+			ts.reset()
 			labelsPool, fpBuf, err = ts.unmarshalProtobuf(data, groupLabels, labelsPool, fpBuf)
 			if err != nil {
 				return fmt.Errorf("cannot unmarshal timeseries: %w", err)
@@ -109,14 +111,28 @@ func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels []
 	return nil
 }
 
+func (ts *TimeSerie) reset() {
+	ts.Fingerprints = ts.Fingerprints[:0]
+	ts.GroupLabels = ts.GroupLabels[:0]
+}
+
 func (ts *TimeSerie) unmarshalProtobuf(src []byte, groupLabels []string, labelsPool []Label, fpBuf []byte) ([]Label, []byte, error) {
 	// message TimeSeries {
 	//   repeated Label labels   = 1;
 	//   repeated Sample samples = 2;
 	// }
-	fpBuf = fpBuf[:0]
 
 	labelsPoolLen := len(labelsPool)
+
+	if isFP, err := isFingerprintTimeSerie(src); err != nil {
+		return nil, nil, err
+	} else if isFP {
+		labelsPool, err := ts.unmarshalFingerprintProtobuf(src, groupLabels, labelsPool)
+		return labelsPool, fpBuf, err
+	}
+
+	fpBuf = fpBuf[:0]
+
 	var fc easyproto.FieldContext
 	for len(src) > 0 {
 		var err error
@@ -151,8 +167,108 @@ func (ts *TimeSerie) unmarshalProtobuf(src []byte, groupLabels []string, labelsP
 		}
 	}
 	ts.GroupLabels = labelsPool[labelsPoolLen:]
-	ts.Fingerprint = fingerprint(fpBuf)
+	ts.Fingerprints = append(ts.Fingerprints[:0], fingerprint(fpBuf))
 	return labelsPool, fpBuf, nil
+}
+
+func (ts *TimeSerie) unmarshalFingerprintProtobuf(src []byte, groupLabels []string, labelsPool []Label) ([]Label, error) {
+	// message TimeSeries {
+	//   repeated Label labels   = 1;
+	//   repeated Sample samples = 2;
+	// }
+
+	labelsPoolLen := len(labelsPool)
+
+	var fc easyproto.FieldContext
+	for len(src) > 0 {
+		var err error
+		src, err = fc.NextField(src)
+		if err != nil {
+			return labelsPool, fmt.Errorf("cannot read the next field: %w", err)
+		}
+		switch fc.FieldNum {
+		case 1:
+			data, ok := fc.MessageData()
+			if !ok {
+				return labelsPool, fmt.Errorf("cannot read label data")
+			}
+			if len(labelsPool) < cap(labelsPool) {
+				labelsPool = labelsPool[:len(labelsPool)+1]
+			} else {
+				labelsPool = append(labelsPool, Label{})
+			}
+			label := &labelsPool[len(labelsPool)-1]
+			if err := label.unmarshalProtobuf(data); err != nil {
+				return labelsPool, fmt.Errorf("cannot unmarshal label: %w", err)
+			}
+			if label.Name == `__name__` {
+				labelsPool = labelsPool[:len(labelsPool)-1]
+				continue
+			}
+			if label.Name == `__original_name__` {
+				label.Name = `__name__`
+			}
+
+			if !slices.Contains(groupLabels, label.Name) {
+				labelsPool = labelsPool[:len(labelsPool)-1]
+			}
+		case 2:
+			// message Sample {
+			//   double value     = 1;
+			//   int64 timestamp  = 2;
+			// }
+			data, ok := fc.MessageData()
+			if !ok {
+				return labelsPool, fmt.Errorf("cannot read sample data")
+			}
+			var sfc easyproto.FieldContext
+			for len(data) > 0 {
+				var sfcErr error
+				data, sfcErr = sfc.NextField(data)
+				if sfcErr != nil {
+					return labelsPool, fmt.Errorf("cannot read sample field: %w", sfcErr)
+				}
+				if sfc.FieldNum == 1 {
+					v, ok := sfc.Double()
+					if !ok {
+						return labelsPool, fmt.Errorf("cannot read sample value")
+					}
+					ts.Fingerprints = append(ts.Fingerprints, math.Float64bits(v))
+				}
+			}
+		}
+	}
+
+	ts.GroupLabels = labelsPool[labelsPoolLen:]
+	return labelsPool, nil
+}
+
+func isFingerprintTimeSerie(src []byte) (bool, error) {
+	label := &Label{}
+	var fc easyproto.FieldContext
+	for len(src) > 0 {
+		var err error
+		src, err = fc.NextField(src)
+		if err != nil {
+			return false, fmt.Errorf("cannot read the next field: %w", err)
+		}
+		switch fc.FieldNum {
+		case 1:
+			data, ok := fc.MessageData()
+			if !ok {
+				return false, fmt.Errorf("cannot read label data")
+			}
+			if err := label.unmarshalProtobuf(data); err != nil {
+				return false, fmt.Errorf("cannot unmarshal label: %w", err)
+			}
+
+			if label.Name == "__name__" {
+				return label.Value == "cardinality_fingerprint", nil
+			}
+		}
+	}
+
+	return false, nil
 }
 
 func (lbl *Label) unmarshalProtobuf(src []byte) (err error) {

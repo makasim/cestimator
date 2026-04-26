@@ -142,8 +142,8 @@ func insertSeriesIntoEstimator(e *estimator, numSeries, groupsNum int) {
 		}
 		e.insertMany([]protoparser.TimeSerie{
 			{
-				GroupLabels: labels,
-				Fingerprint: uint64(i),
+				GroupLabels:  labels,
+				Fingerprints: []uint64{uint64(i)},
 			},
 		})
 	}
