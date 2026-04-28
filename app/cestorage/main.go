@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"io"
+	"net/http/httptest"
 	"os"
 	"time"
 
@@ -12,11 +14,13 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/procutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/pushmetrics"
+	"github.com/VictoriaMetrics/metrics"
 )
 
 var (
 	httpListenAddrs = flagutil.NewArrayString("httpListenAddr", "TCP address to listen for incoming HTTP requests")
 	configPath      = flag.String("config", "config.yaml", "Path to YAML configuration file")
+	exposeMetrics   = flag.Bool("exposeMetrics", false, "Whether to expose ce metrics at /metrics endpoint")
 )
 
 func main() {
@@ -48,6 +52,14 @@ func main() {
 	startTime := time.Now()
 
 	go httpserver.Serve(listenAddrs, requestHandler(estimators), httpserver.ServeOptions{})
+
+	if *exposeMetrics {
+		metrics.RegisterMetricsWriter(func(w io.Writer) {
+			rw := httptest.NewRecorder()
+			handleCardinalityMetrics(rw, nil, estimators)
+			w.Write(rw.Body.Bytes())
+		})
+	}
 
 	logger.Infof("started cestorage in %.3f seconds", time.Since(startTime).Seconds())
 
