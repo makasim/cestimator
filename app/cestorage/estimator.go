@@ -52,6 +52,8 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 			precision:    14,
 			sparse:       true,
 
+			sketchPool: make([]*hyperloglog.Sketch, 0, 2000),
+
 			stopCh: make(chan struct{}),
 		}
 
@@ -387,7 +389,7 @@ func (eb *estimatorBucket) getSketch() *hyperloglog.Sketch {
 }
 
 func (eb *estimatorBucket) putSketchLocked(sk *hyperloglog.Sketch) bool {
-	if len(eb.sketchPool) >= 2000 {
+	if len(eb.sketchPool) >= cap(eb.sketchPool) {
 		return false
 	}
 	sk.Reset()
