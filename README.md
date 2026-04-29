@@ -5,6 +5,10 @@ and exposes approximate time series cardinality as metrics (TODO: support remote
 
 It is useful for tracking how many unique time series are flowing through across all metrics, metric name, or broken down by specific labels.
 
+## Goal
+
+The goal of this project is to evaluate whether cardinality estimation can provide practical value within VictoriaMetrics and justify its inclusion in the core system (see [proposal](https://github.com/VictoriaMetrics/VictoriaMetrics/issues/10848)).
+
 ## How it works
 
 Running:
@@ -51,7 +55,12 @@ go run ./app/cegen/main.go -cardI=100 -cardY=20 -template="foo{instance=\"127.0.
 
 ## Metrics
 
-Cardinality estimates are exposed at `/cardinality/metrics` in Prometheus text format.
+By default, cardinality estimates are merged with regular metrics and exposed at `/metrics`.
+
+This behavior is controlled by the `-cardinalityMetrics.exposeAt` flag:
+- `-cardinalityMetrics.exposeAt=/metrics` (default): cardinality metrics merged with regular metrics at `/metrics`
+- `-cardinalityMetrics.exposeAt=/cardinality/metrics`: only cardinality metrics exposed at that path
+- `-cardinalityMetrics.exposeAt=`: cardinality metrics not exposed via HTTP
 
 All metrics include `interval`, `group_by_keys`, and `group_by_values` labels. Extra labels from the `labels` config field are inserted between `interval` and `group_by_keys` (sorted alphabetically).
 
