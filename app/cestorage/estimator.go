@@ -195,6 +195,9 @@ type estimatorBucket struct {
 	groups     map[string]*hyperloglog.Sketch
 	prevGroups map[string]*hyperloglog.Sketch
 
+	sketchPoolMu sync.Mutex
+	sketchPool   []*hyperloglog.Sketch
+
 	stopCh chan struct{}
 }
 
@@ -241,16 +244,31 @@ func (eb *estimatorBucket) runRotation() {
 
 func (eb *estimatorBucket) rotate() {
 	eb.mu.Lock()
-	defer eb.mu.Unlock()
 
+	var prevSK *hyperloglog.Sketch
 	if len(eb.groupBy) == 0 {
+		prevSK = eb.prevSketch
 		eb.prevSketch = eb.sketch
 		eb.sketch = eb.newSketch()
+		eb.mu.Unlock()
 		return
 	}
 
+	prevGroups := eb.prevGroups
 	eb.prevGroups = eb.groups
 	eb.groups = make(map[string]*hyperloglog.Sketch, len(eb.groups))
+	eb.mu.Unlock()
+
+	eb.sketchPoolMu.Lock()
+	defer eb.sketchPoolMu.Unlock()
+	if prevSK != nil {
+		eb.putSketchLocked(prevSK)
+	}
+	for _, sk := range prevGroups {
+		if !eb.putSketchLocked(sk) {
+			break
+		}
+	}
 }
 
 func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupKey string) {
@@ -345,12 +363,36 @@ func (eb *estimatorBucket) estimateSketch(cur, prev, res *hyperloglog.Sketch) {
 }
 
 func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
+	if sk := eb.getSketch(); sk != nil {
+		return sk
+	}
 	sk, err := hyperloglog.NewSketch(eb.precision, eb.sparse)
 	if err != nil {
 		panic(fmt.Sprintf("cannot create HLL sketch with precision=%d and sparse=%v: %s", eb.precision, eb.sparse, err))
 	}
-
 	return sk
+}
+
+func (eb *estimatorBucket) getSketch() *hyperloglog.Sketch {
+	eb.sketchPoolMu.Lock()
+	defer eb.sketchPoolMu.Unlock()
+
+	if n := len(eb.sketchPool); n > 0 {
+		sk := eb.sketchPool[n-1]
+		eb.sketchPool[n-1] = nil
+		eb.sketchPool = eb.sketchPool[:n-1]
+		return sk
+	}
+	return nil
+}
+
+func (eb *estimatorBucket) putSketchLocked(sk *hyperloglog.Sketch) bool {
+	if len(eb.sketchPool) >= 2000 {
+		return false
+	}
+	sk.Reset()
+	eb.sketchPool = append(eb.sketchPool, sk)
+	return true
 }
 
 func hash(v []byte) uint64 {
