@@ -55,7 +55,12 @@ go run ./app/cegen/main.go -cardI=100 -cardY=20 -template="foo{instance=\"127.0.
 
 ## Metrics
 
-Cardinality estimates are exposed at `/cardinality/metrics` in Prometheus text format.
+By default, cardinality estimates are merged with regular metrics and exposed at `/metrics`.
+
+This behavior is controlled by the `-cardinalityMetrics.exposeAt` flag:
+- `-cardinalityMetrics.exposeAt=/metrics` (default): cardinality metrics merged with regular metrics at `/metrics`
+- `-cardinalityMetrics.exposeAt=/cardinality/metrics`: only cardinality metrics exposed at that path
+- `-cardinalityMetrics.exposeAt=`: cardinality metrics not exposed via HTTP
 
 All metrics include `interval`, `group_by_keys`, and `group_by_values` labels. Extra labels from the `labels` config field are inserted between `interval` and `group_by_keys` (sorted alphabetically).
 
