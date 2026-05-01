@@ -919,7 +919,7 @@
           "refId": "A"
         }
       ],
-      "title": "Groups rejected",
+      "title": "Group keys rejected",
       "type": "timeseries"
     },
     {
@@ -1026,7 +1026,7 @@
           "refId": "A"
         }
       ],
-      "title": "Group size %",
+      "title": "Group keys size %",
       "type": "timeseries"
     },
     {
@@ -1585,7 +1585,7 @@
     }
   ],
   "preload": false,
-  "refresh": "10s",
+  "refresh": "",
   "schemaVersion": 42,
   "tags": [],
   "templating": {
@@ -1606,11 +1606,9 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": [
-            "cestimator"
-          ],
+          "text": "All",
           "value": [
-            "cestimator"
+            "$__all"
           ]
         },
         "datasource": {
@@ -1636,11 +1634,9 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": [
-            "192.168.50.102:8490"
-          ],
+          "text": "All",
           "value": [
-            "192.168.50.102:8490"
+            "$__all"
           ]
         },
         "datasource": {
@@ -1666,13 +1662,13 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "utc",
   "title": "cestimator",
   "uid": "mkv22l4",
-  "version": 15,
+  "version": 17,
   "weekStart": ""
 }
