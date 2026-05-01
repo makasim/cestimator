@@ -64,9 +64,6 @@ func TestGlobalEstimate(t *testing.T) {
 			if eb.groupSize.Load() != 0 {
 				t.Fatalf("expected bucket %d groupSize to be 0 but got %d", i, eb.groupSize.Load())
 			}
-			if eb.groupRejectedSketch != nil {
-				t.Fatalf("expected bucket %d groupRejectedSketch to be nil", i)
-			}
 		}
 
 		buf := bytes.NewBuffer(nil)
@@ -457,7 +454,7 @@ func TestGroupEstimateGroupLimit(t *testing.T) {
 			Interval:   time.Minute * 10,
 			GroupBy:    []string{"foo"},
 			GroupLimit: groupLimit,
-			Buckets:    1, // single bucket for determinism
+			Buckets:    3,
 		}
 
 		e, err := newEstimator(cfg)
@@ -487,64 +484,60 @@ func TestGroupEstimateGroupLimit(t *testing.T) {
 			t.Fatalf("rejected expected: %d; got: %d", expRejected, actRejected)
 		}
 	}
-	//
-	//	// all groups accepted
-	//	f(3, func(e *estimator) {
-	//		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b"), makeTS("c")})
-	//	}, 0, `
-	//cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 3
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="c"} 1`,
-	//	)
-	//
-	//	// 2 groups only accepted
-	//	f(2, func(e *estimator) {
-	//		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b"), makeTS("c")})
-	//	}, 1, `
-	//cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 2
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="c"} 0`,
-	//	)
-	//
-	//	// one group only accepted
-	//	f(1, func(e *estimator) {
-	//		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b"), makeTS("c")})
-	//	}, 2, `
-	//cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 0
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="c"} 0`,
-	//	)
-	//
-	//	// after rotate: groups in prevGroups bypass the limit; new groups are still checked
-	//	f(2, func(e *estimator) {
-	//		// fills limit
-	//		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b")})
-	//		e.rotate()
-	//		// "a" bypasses, "c" rejected
-	//		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("c")})
-	//	}, 1, `
-	//cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 2
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="c"} 0`,
-	//	)
-	//
-	//	// after rotate: new group accepted when remaining capacity allows
-	//	f(3, func(e *estimator) {
-	//		// 2 groups, limit=3
-	//		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b")})
-	//		e.rotate()
-	//		// "a" bypasses, "c" accepted (2+1=3 <= 3)
-	//		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("c")})
-	//	}, 0, `
-	//cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 3
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 1
-	//cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="c"} 1`,
-	//	)
+
+	// all groups accepted
+	f(3, func(e *estimator) {
+		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b"), makeTS("c")})
+	}, 0, `
+cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 3
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 1
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="c"} 1`,
+	)
+
+	// 2 groups only accepted
+	f(2, func(e *estimator) {
+		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b"), makeTS("c")})
+	}, 1, `
+cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 2
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 1`,
+	)
+
+	// one group only accepted
+	f(1, func(e *estimator) {
+		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b"), makeTS("c")})
+	}, 2, `
+cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 1
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1`,
+	)
+
+	// after rotate: groups in prevGroups bypass the limit; new groups are still checked
+	f(2, func(e *estimator) {
+		// fills limit
+		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b")})
+		e.rotate()
+		// "a" bypasses, "c" rejected
+		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("c")})
+	}, 1, `
+cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 2
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 1`,
+	)
+
+	// after rotate: new group accepted when remaining capacity allows
+	f(3, func(e *estimator) {
+		// 2 groups, limit=3
+		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("b")})
+		e.rotate()
+		// "a" bypasses, "c" accepted (2+1=3 <= 3)
+		e.insertMany([]protoparser.TimeSerie{makeTS("a"), makeTS("c")})
+	}, 0, `
+cardinality_estimate{interval="10m0s",group_by_keys="__group__",group_by_values="foo"} 3
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="a"} 1
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="b"} 1
+cardinality_estimate{interval="10m0s",group_by_keys="foo",group_by_values="c"} 1`,
+	)
 
 	// reject 100
 	f(3, func(e *estimator) {

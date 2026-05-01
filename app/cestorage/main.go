@@ -24,7 +24,6 @@ var (
 	configPath      = flag.String("config", "config.yaml", "Path to YAML configuration file")
 
 	prometheusWriteRequests = metrics.NewCounter(`cestorage_http_requests_total{path="/api/v1/write", protocol="promremotewrite"}`)
-	rowsInserted            = metrics.NewCounter(`cestorage_rows_inserted_total{type="promremotewrite"}`)
 )
 
 func main() {
@@ -89,7 +88,6 @@ func main() {
 				for _, e := range estimators {
 					e.insertMany(tss)
 				}
-				rowsInserted.Add(len(tss))
 			})
 			if err != nil {
 				httpserver.Errorf(w, r, "error parsing remote write request: %s", err)

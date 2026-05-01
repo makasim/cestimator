@@ -20,9 +20,17 @@ import (
 )
 
 type estimator struct {
-	groupBy    []string
-	buckets    []*estimatorBucket
-	metricsSet *metrics.Set
+	groupBy          []string
+	groupByKeysLabel string
+
+	groupSize           atomic.Int64
+	groupRejectedMu     sync.Mutex
+	groupRejectedSketch *hyperloglog.Sketch
+
+	buckets []*estimatorBucket
+
+	metricsSet  *metrics.Set
+	insertTotal *metrics.Counter
 
 	stopCh chan struct{}
 }
@@ -50,22 +58,40 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 		}
 	}
 
-	e := &estimator{
-		groupBy:    cfg.GroupBy,
-		buckets:    make([]*estimatorBucket, cfg.Buckets),
-		metricsSet: metrics.NewSet(),
-		stopCh:     make(chan struct{}),
+	groupByKeysLabel := "__global__"
+	if len(cfg.GroupBy) > 0 {
+		groupByKeysLabel = strings.Join(cfg.GroupBy, `,`)
 	}
 
-	groupKeyLabel := strings.Join(cfg.GroupBy, `,`)
+	e := &estimator{
+		groupBy:             cfg.GroupBy,
+		groupByKeysLabel:    groupByKeysLabel,
+		groupRejectedSketch: mustNewGroupRejectSketch(),
+		buckets:             make([]*estimatorBucket, cfg.Buckets),
+		metricsSet:          metrics.NewSet(),
+		stopCh:              make(chan struct{}),
+	}
+
+	e.insertTotal = e.metricsSet.NewCounter(
+		fmt.Sprintf(`cestorage_estimator_insert_total{group_by_keys=%q}`, e.groupByKeysLabel),
+	)
+	e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_estimator_group_rejected_size{group_by_keys=%q}`, e.groupByKeysLabel), func() float64 {
+		e.groupRejectedMu.Lock()
+		defer e.groupRejectedMu.Unlock()
+		return float64(e.groupRejectedSketch.Estimate())
+	})
+
 	for i := 0; i < len(e.buckets); i++ {
 		eb := &estimatorBucket{
-			groupBy:       cfg.GroupBy,
-			extraLabels:   cfg.Labels,
-			interval:      cfg.Interval,
-			metricPrefix:  metricPrefix,
-			groupKeyLabel: groupKeyLabel,
-			groupLimit:    int64(cfg.GroupLimit),
+			groupBy:             cfg.GroupBy,
+			extraLabels:         cfg.Labels,
+			interval:            cfg.Interval,
+			metricPrefix:        metricPrefix,
+			groupByKeysLabel:    groupByKeysLabel,
+			groupLimit:          int64(cfg.GroupLimit),
+			groupSize:           &e.groupSize,
+			groupRejectedMu:     &e.groupRejectedMu,
+			groupRejectedSketch: e.groupRejectedSketch,
 
 			precision: 14,
 			sparse:    true,
@@ -77,16 +103,10 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 			eb.groups = make(map[string]*hyperloglog.Sketch)
 			eb.prevGroups = make(map[string]*hyperloglog.Sketch)
 
-			e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_group_estimator_size{groupBy=%q,bucket="%d"}`, eb.groupKeyLabel, i), func() float64 {
+			e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_estimator_group_size{group_by_keys=%q,bucket="%d"}`, eb.groupByKeysLabel, i), func() float64 {
 				return float64(eb.groupSize.Load())
 			})
-			e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_group_estimator_rejected_size{groupBy=%q,bucket="%d"}`, eb.groupKeyLabel, i), func() float64 {
-				eb.groupRejectedSketchMu.Lock()
-				defer eb.groupRejectedSketchMu.Unlock()
-
-				return float64(eb.groupRejectedSketch.Estimate())
-			})
-			e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_group_limit{groupBy=%q,bucket="%d"}`, eb.groupKeyLabel, i), func() float64 {
+			e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_estimator_group_limit{group_by_keys=%q,bucket="%d"}`, eb.groupByKeysLabel, i), func() float64 {
 				return float64(eb.groupLimit)
 			})
 		}
@@ -95,6 +115,8 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 
 		e.buckets[i] = eb
 	}
+
+	metrics.RegisterSet(e.metricsSet)
 
 	return e, nil
 }
@@ -126,6 +148,7 @@ func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
 	groupValues := getGroupValuesSlice()
 	defer putGroupValuesSlice(groupValues)
 
+	var cnt int
 	for _, ts := range tss {
 		groupValues = groupValues[:0]
 
@@ -158,13 +181,21 @@ func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
 
 		i := int(hash(groupValues) % bucketsNum)
 		e.buckets[i].insert(ts, b2s(groupValues))
+		cnt++
 	}
+
+	e.insertTotal.Add(cnt)
 }
 
 func (e *estimator) reset() {
+	e.groupSize.Store(0)
 	for _, b := range e.buckets {
 		b.reset()
 	}
+
+	e.groupRejectedMu.Lock()
+	e.groupRejectedSketch.Reset()
+	e.groupRejectedMu.Unlock()
 }
 
 func (e *estimator) writeMetrics(w io.Writer) {
@@ -185,17 +216,16 @@ func (e *estimator) writeMetrics(w io.Writer) {
 		return
 	}
 
-	groupSize := int64(0)
 	for _, b := range e.buckets {
-		groupSize += b.writeGroupMetrics(w, formatBuf, eb0.groupKeyLabel)
+		b.writeGroupMetrics(w, formatBuf, eb0.groupByKeysLabel)
 	}
 
 	formatBuf = formatBuf[:0]
 	formatBuf = append(formatBuf, eb0.metricPrefix...)
 	formatBuf = append(formatBuf, `,group_by_keys="__group__",group_by_values="`...)
-	formatBuf = append(formatBuf, eb0.groupKeyLabel...)
+	formatBuf = append(formatBuf, eb0.groupByKeysLabel...)
 	formatBuf = append(formatBuf, `"} `...)
-	formatBuf = strconv.AppendInt(formatBuf, groupSize, 10)
+	formatBuf = strconv.AppendInt(formatBuf, e.groupSize.Load(), 10)
 	formatBuf = append(formatBuf, "\n"...)
 	w.Write(formatBuf)
 }
@@ -214,34 +244,40 @@ func (e *estimator) runRotation(interval time.Duration) {
 }
 
 func (e *estimator) rotate() {
+	e.groupSize.Store(0)
+
 	var wg sync.WaitGroup
 	for i := range e.buckets {
 		wg.Go(e.buckets[i].rotate)
 	}
 	wg.Wait()
+
+	e.groupRejectedMu.Lock()
+	e.groupRejectedSketch.Reset()
+	e.groupRejectedMu.Unlock()
 }
 
 type estimatorBucket struct {
 	mu sync.Mutex
 
-	groupBy       []string
-	groupLimit    int64
-	extraLabels   map[string]string
-	interval      time.Duration
-	metricPrefix  string
-	groupKeyLabel string
-	precision     uint8
-	sparse        bool
+	groupBy          []string
+	groupLimit       int64
+	extraLabels      map[string]string
+	interval         time.Duration
+	metricPrefix     string
+	groupByKeysLabel string
+	precision        uint8
+	sparse           bool
 
 	sketch     *hyperloglog.Sketch
 	prevSketch *hyperloglog.Sketch
 
-	groupSize  atomic.Int64
+	groupSize  *atomic.Int64
 	groups     map[string]*hyperloglog.Sketch
 	prevGroups map[string]*hyperloglog.Sketch
 
-	groupRejectedSketchMu sync.Mutex
-	groupRejectedSketch   *hyperloglog.Sketch
+	groupRejectedMu     *sync.Mutex
+	groupRejectedSketch *hyperloglog.Sketch
 }
 
 func (eb *estimatorBucket) String() string {
@@ -280,13 +316,7 @@ func (eb *estimatorBucket) rotate() {
 	eb.groups = make(map[string]*hyperloglog.Sketch, len(eb.groups))
 	eb.mu.Unlock()
 
-	eb.groupSize.Store(int64(len(eb.prevGroups)))
-
-	eb.groupRejectedSketchMu.Lock()
-	if eb.groupRejectedSketch != nil {
-		eb.groupRejectedSketch.Reset()
-	}
-	eb.groupRejectedSketchMu.Unlock()
+	eb.groupSize.Add(int64(len(eb.prevGroups)))
 }
 
 func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValues string) {
@@ -303,12 +333,9 @@ func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValues string) 
 		if eb.prevGroups[groupValues] == nil {
 			groupSize := eb.groupSize.Load()
 			if groupSize+1 > eb.groupLimit {
-				eb.groupRejectedSketchMu.Lock()
-				if eb.groupRejectedSketch == nil {
-					eb.groupRejectedSketch = mustNewGroupRejectSketch()
-				}
+				eb.groupRejectedMu.Lock()
 				eb.groupRejectedSketch.InsertHash(hash([]byte(groupValues)))
-				eb.groupRejectedSketchMu.Unlock()
+				eb.groupRejectedMu.Unlock()
 				return
 			}
 
@@ -329,7 +356,7 @@ func (eb *estimatorBucket) writeNoGroupMetric(res *hyperloglog.Sketch) {
 	return
 }
 
-func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, groupByKey string) int64 {
+func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, groupByKey string) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
@@ -369,8 +396,6 @@ func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, grou
 		formatBuf = append(formatBuf, "\n"...)
 		w.Write(formatBuf)
 	}
-
-	return eb.groupSize.Load()
 }
 
 func (eb *estimatorBucket) ensureKeySet(res map[string]*hyperloglog.Sketch, key string) {
@@ -395,7 +420,7 @@ func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
 }
 
 func mustNewGroupRejectSketch() *hyperloglog.Sketch {
-	return mustNewSketch(14, true)
+	return mustNewSketch(10, true)
 }
 
 func mustNewSketch(precision uint8, sparse bool) *hyperloglog.Sketch {
