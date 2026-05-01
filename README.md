@@ -25,24 +25,26 @@ streams:
 
   # Track cardinality grouped by metric name.
   - interval: '1h'
-    group: ["__name__"]
+    group_by: ["__name__"]
 
   # Track cardinality grouped by job label.
   - interval: '1m'
-    group: ["job"]
+    group_by: ["job"]
 
   # Track cardinality grouped by tenant info
-  - group: ["vm_account_id", "vm_project_id"]
+  - group_by: ["vm_account_id", "vm_project_id"]
 
   # Track cardinality of jobs, with extra labels on the output metrics.
-  - group: ["job"]
+  - group_by: ["job"]
     labels:
       region: 'eu-central-1'
       env: 'production'
 ```
 
 Fields:
-- `group` (optional): list of label names to split cardinality by; each distinct combination gets its own estimate
+- `group_by` (optional): list of label names to split cardinality by; each distinct combination gets its own estimate
+- `group_limit` (optional): maximum number of distinct groups to track; excess groups are counted in a rejected sketch but not individually; defaults to `10000`
+- `buckets` (optional): number of internal shards for parallel ingestion; defaults to `min(20, availableCPUs)`
 - `labels` (optional): extra labels attached to all output metrics for this estimator
 - `interval` (optional): how often to rotate (reset) counters; defaults to `5m`
 
@@ -80,6 +82,14 @@ cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_value
 ```
 cardinality_estimate{interval="5m0s",env="production",region="eu-central-1",group_by_keys="job",group_by_values="prometheus"} 312
 ```
+
+## Operational metrics
+
+When grouping is enabled, cestorage exposes per-bucket operational metrics at `/metrics`:
+
+- `cestorage_group_estimator_size{groupBy, bucket}` — number of active groups in this bucket after the last rotation
+- `cestorage_group_estimator_rejected_size{groupBy, bucket}` — estimated number of distinct group values rejected since the last rotation because `group_limit` was reached
+- `cestorage_group_limit{groupBy, bucket}` — configured `group_limit` for this bucket
 
 ## Dashboard
 
