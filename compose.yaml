@@ -21,7 +21,7 @@ configs:
         - interval: '2m'
       
         - interval: '2m'
-          group: ["__name__"]
+          group_by: ["__name__"]
       
         - interval: '2m'
-          group: ["job"]
+          group_by: ["job"]

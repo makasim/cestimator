@@ -7,8 +7,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/cgroup"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/axiomhq/hyperloglog"
 	"github.com/dgryski/go-metro"
@@ -19,14 +22,36 @@ import (
 var fingerprintsInserted = metrics.NewCounter(`cestimator_fingerprints_inserted`)
 
 type estimator struct {
-	groupBy []string
+	groupBy          []string
+	groupByKeysLabel string
+
+	groupSize           atomic.Int64
+	groupRejectedMu     sync.Mutex
+	groupRejectedSketch *hyperloglog.Sketch
 
 	buckets []*estimatorBucket
+
+	metricsSet  *metrics.Set
+	insertTotal *metrics.Counter
+
+	stopCh chan struct{}
 }
 
 func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 	if cfg.Interval == 0 {
 		cfg.Interval = time.Minute * 5
+	}
+	if cfg.GroupLimit <= 0 {
+		cfg.GroupLimit = 10000
+	}
+	if cfg.Buckets <= 0 {
+		cfg.Buckets = min(20, cgroup.AvailableCPUs())
+	}
+	if cfg.HLLPrecision == 0 {
+		cfg.HLLPrecision = 14
+	}
+	if cfg.HLLSparse == nil {
+		cfg.HLLSparse = new(true)
 	}
 
 	metricPrefix := fmt.Sprintf("cardinality_estimate{interval=%q", cfg.Interval)
@@ -41,48 +66,78 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 		}
 	}
 
-	e := &estimator{
-		groupBy: cfg.Group,
-		buckets: make([]*estimatorBucket, 20),
+	groupByKeysLabel := "__global__"
+	if len(cfg.GroupBy) > 0 {
+		groupByKeysLabel = strings.Join(cfg.GroupBy, `,`)
 	}
+
+	e := &estimator{
+		groupBy:             cfg.GroupBy,
+		groupByKeysLabel:    groupByKeysLabel,
+		groupRejectedSketch: mustNewGroupRejectSketch(),
+		buckets:             make([]*estimatorBucket, cfg.Buckets),
+		metricsSet:          metrics.NewSet(),
+		stopCh:              make(chan struct{}),
+	}
+
+	e.insertTotal = e.metricsSet.NewCounter(
+		fmt.Sprintf(`cestorage_estimator_insert_total{group_by_keys=%q}`, e.groupByKeysLabel),
+	)
+	e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_estimator_group_rejected_size{group_by_keys=%q}`, e.groupByKeysLabel), func() float64 {
+		e.groupRejectedMu.Lock()
+		defer e.groupRejectedMu.Unlock()
+		return float64(e.groupRejectedSketch.Estimate())
+	})
 
 	for i := 0; i < len(e.buckets); i++ {
 		eb := &estimatorBucket{
-			groupBy:      cfg.Group,
-			extraLabels:  cfg.Labels,
-			interval:     cfg.Interval,
-			metricPrefix: metricPrefix,
-			precision:    14,
-			sparse:       true,
+			groupBy:             cfg.GroupBy,
+			extraLabels:         cfg.Labels,
+			interval:            cfg.Interval,
+			metricPrefix:        metricPrefix,
+			groupByKeysLabel:    groupByKeysLabel,
+			groupLimit:          int64(cfg.GroupLimit),
+			groupSize:           &e.groupSize,
+			groupRejectedMu:     &e.groupRejectedMu,
+			groupRejectedSketch: e.groupRejectedSketch,
 
-			stopCh: make(chan struct{}),
+			precision: cfg.HLLPrecision,
+			sparse:    *cfg.HLLSparse,
 		}
 
-		if len(cfg.Group) == 0 {
+		if len(cfg.GroupBy) == 0 {
 			eb.sketch = eb.newSketch()
 		} else {
 			eb.groups = make(map[string]*hyperloglog.Sketch)
 			eb.prevGroups = make(map[string]*hyperloglog.Sketch)
+
+			e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_estimator_group_size{group_by_keys=%q,bucket="%d"}`, eb.groupByKeysLabel, i), func() float64 {
+				return float64(eb.groupSize.Load())
+			})
+			e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_estimator_group_limit{group_by_keys=%q,bucket="%d"}`, eb.groupByKeysLabel, i), func() float64 {
+				return float64(eb.groupLimit)
+			})
 		}
 
-		go eb.runRotation()
+		go e.runRotation(cfg.Interval)
 
 		e.buckets[i] = eb
 	}
+
+	metrics.RegisterSet(e.metricsSet)
 
 	return e, nil
 }
 
 func (e *estimator) stop() {
-	for _, b := range e.buckets {
-		b.stop()
-	}
+	close(e.stopCh)
+	e.metricsSet.UnregisterAllMetrics()
 }
 
-var keyPool = sync.Pool{}
+var groupValuesPool = sync.Pool{}
 
-func getKeySlice() []byte {
-	v0 := keyPool.Get()
+func getGroupValuesSlice() []byte {
+	v0 := groupValuesPool.Get()
 	if v0 == nil {
 		return nil
 	}
@@ -90,61 +145,72 @@ func getKeySlice() []byte {
 	return v0.([]byte)
 }
 
-func putKeySlice(key []byte) {
+func putGroupValuesSlice(key []byte) {
 	key = key[:0]
-	keyPool.Put(key)
+	groupValuesPool.Put(key)
 }
 
 func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
 	bucketsNum := uint64(len(e.buckets))
 
-	key := getKeySlice()
-	defer putKeySlice(key)
+	groupValues := getGroupValuesSlice()
+	defer putGroupValuesSlice(groupValues)
 
+	var cnt int
 	for _, ts := range tss {
-		for _, fp := range ts.Fingerprints {
-			if len(e.groupBy) == 0 {
+		groupValues = groupValues[:0]
+
+		if len(e.groupBy) == 0 {
+			for _, fp := range ts.Fingerprints {
 				i := int(fp % bucketsNum)
 				e.buckets[i].insert(fp, "")
 				fingerprintsInserted.Inc()
-				continue
+			}
+			continue
+		}
+
+		var hasNames bool
+		for i, labelName := range e.groupBy {
+			if i > 0 {
+				groupValues = append(groupValues, ',')
 			}
 
-			key = key[:0]
-			var hasNonEmptyLabel bool
-			for i, labelName := range e.groupBy {
-				if i > 0 {
-					key = append(key, ',')
-				}
+			for _, l := range ts.GroupLabels {
+				if l.Name == labelName {
+					hasNames = true
 
-				for _, l := range ts.GroupLabels {
-					if l.Name == labelName {
-						if l.Value != "" {
-							hasNonEmptyLabel = true
-						}
-
-						key = append(key, l.Value...)
-						break
-					}
+					groupValues = append(groupValues, l.Value...)
+					break
 				}
 			}
-			// time series does not contribute to this group
-			if !hasNonEmptyLabel {
-				continue
-			}
+		}
 
-			i := int(hash(key) % bucketsNum)
-			e.buckets[i].insert(fp, string(key))
+		// time series does not contribute to this groupBy
+		if !hasNames {
+			continue
+		}
+
+		groupKey := b2s(groupValues)
+		for _, fp := range ts.Fingerprints {
+			i := int(hash(groupValues) % bucketsNum)
+			e.buckets[i].insert(fp, groupKey)
 			fingerprintsInserted.Inc()
+			cnt++
 		}
 	}
 
+	e.insertTotal.Add(cnt)
 }
 
 func (e *estimator) reset() {
+	e.groupSize.Store(0)
 	for _, b := range e.buckets {
 		b.reset()
 	}
+
+	e.groupRejectedMu.Lock()
+	e.groupRejectedSketch.Reset()
+	e.groupRejectedMu.Unlock()
 }
 
 func (e *estimator) writeMetrics(w io.Writer) {
@@ -165,54 +231,73 @@ func (e *estimator) writeMetrics(w io.Writer) {
 		return
 	}
 
-	keys := 0
-	groupByKey := strings.Join(eb0.groupBy, ",")
 	for _, b := range e.buckets {
-		keys += b.writeGroupMetrics(w, formatBuf, groupByKey)
+		b.writeGroupMetrics(w, formatBuf, eb0.groupByKeysLabel)
 	}
 
 	formatBuf = formatBuf[:0]
 	formatBuf = append(formatBuf, eb0.metricPrefix...)
 	formatBuf = append(formatBuf, `,group_by_keys="__group__",group_by_values="`...)
-	formatBuf = append(formatBuf, groupByKey...)
+	formatBuf = append(formatBuf, eb0.groupByKeysLabel...)
 	formatBuf = append(formatBuf, `"} `...)
-	formatBuf = strconv.AppendInt(formatBuf, int64(keys), 10)
+	formatBuf = strconv.AppendInt(formatBuf, e.groupSize.Load(), 10)
 	formatBuf = append(formatBuf, "\n"...)
 	w.Write(formatBuf)
 }
 
-//type groupsMap = haxmap.Map[string, *sketch]
-//
-//func newGroupsMap() *groupsMap {
-//	return haxmap.New[string, *sketch]()
-//}
+func (e *estimator) runRotation(interval time.Duration) {
+	t := time.NewTicker(interval / 2)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			e.rotate()
+		case <-e.stopCh:
+			return
+		}
+	}
+}
+
+func (e *estimator) rotate() {
+	e.groupSize.Store(0)
+
+	var wg sync.WaitGroup
+	for i := range e.buckets {
+		wg.Go(e.buckets[i].rotate)
+	}
+	wg.Wait()
+
+	e.groupRejectedMu.Lock()
+	e.groupRejectedSketch.Reset()
+	e.groupRejectedMu.Unlock()
+}
 
 type estimatorBucket struct {
 	mu sync.Mutex
 
-	groupBy      []string
-	extraLabels  map[string]string
-	interval     time.Duration
-	metricPrefix string
-	precision    uint8
-	sparse       bool
+	groupBy          []string
+	groupLimit       int64
+	extraLabels      map[string]string
+	interval         time.Duration
+	metricPrefix     string
+	groupByKeysLabel string
+	precision        uint8
+	sparse           bool
 
 	sketch     *hyperloglog.Sketch
 	prevSketch *hyperloglog.Sketch
+
+	groupSize  *atomic.Int64
 	groups     map[string]*hyperloglog.Sketch
 	prevGroups map[string]*hyperloglog.Sketch
 
-	stopCh chan struct{}
+	groupRejectedMu     *sync.Mutex
+	groupRejectedSketch *hyperloglog.Sketch
 }
 
 func (eb *estimatorBucket) String() string {
 	return fmt.Sprintf(
 		"interval: %s; group_by: %v; extra_labels: %v", eb.interval, eb.groupBy, eb.extraLabels)
-}
-
-// Stop stops the background rotation goroutine, if any.
-func (eb *estimatorBucket) stop() {
-	close(eb.stopCh)
 }
 
 func (eb *estimatorBucket) reset() {
@@ -232,32 +317,21 @@ func (eb *estimatorBucket) reset() {
 	}
 }
 
-// runRotation resets the sketches on every tick until stopCh is closed.
-func (eb *estimatorBucket) runRotation() {
-	t := time.NewTicker(eb.interval / 2)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			eb.rotate()
-		case <-eb.stopCh:
-			return
-		}
-	}
-}
-
 func (eb *estimatorBucket) rotate() {
-	eb.mu.Lock()
-	defer eb.mu.Unlock()
-
 	if len(eb.groupBy) == 0 {
+		eb.mu.Lock()
 		eb.prevSketch = eb.sketch
 		eb.sketch = eb.newSketch()
+		eb.mu.Unlock()
 		return
 	}
 
+	eb.mu.Lock()
 	eb.prevGroups = eb.groups
 	eb.groups = make(map[string]*hyperloglog.Sketch, len(eb.groups))
+	eb.mu.Unlock()
+
+	eb.groupSize.Add(int64(len(eb.prevGroups)))
 }
 
 func (eb *estimatorBucket) insert(fp uint64, groupKey string) {
@@ -271,8 +345,20 @@ func (eb *estimatorBucket) insert(fp uint64, groupKey string) {
 
 	sk := eb.groups[groupKey]
 	if sk == nil {
+		if eb.prevGroups[groupKey] == nil {
+			groupSize := eb.groupSize.Load()
+			if groupSize+1 > eb.groupLimit {
+				eb.groupRejectedMu.Lock()
+				eb.groupRejectedSketch.InsertHash(hash([]byte(groupKey)))
+				eb.groupRejectedMu.Unlock()
+				return
+			}
+
+			eb.groupSize.Add(1)
+		}
+
 		sk = eb.newSketch()
-		eb.groups[groupKey] = sk
+		eb.groups[strings.Clone(groupKey)] = sk
 	}
 	sk.InsertHash(fp)
 }
@@ -285,12 +371,11 @@ func (eb *estimatorBucket) writeNoGroupMetric(res *hyperloglog.Sketch) {
 	return
 }
 
-func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, groupByKey string) int {
+func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, groupByKey string) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
 	res := eb.newSketch()
-	keys := len(eb.groups)
 	for groupByVal := range eb.groups {
 		res.Reset()
 		formatBuf = formatBuf[:0]
@@ -325,11 +410,7 @@ func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, grou
 		formatBuf = strconv.AppendUint(formatBuf, res.Estimate(), 10)
 		formatBuf = append(formatBuf, "\n"...)
 		w.Write(formatBuf)
-
-		keys++
 	}
-
-	return keys
 }
 
 func (eb *estimatorBucket) ensureKeySet(res map[string]*hyperloglog.Sketch, key string) {
@@ -339,10 +420,8 @@ func (eb *estimatorBucket) ensureKeySet(res map[string]*hyperloglog.Sketch, key 
 }
 
 func (eb *estimatorBucket) estimateSketch(cur, prev, res *hyperloglog.Sketch) {
-	if cur != nil {
-		if err := res.Merge(cur); err != nil {
-			panic(err)
-		}
+	if err := res.Merge(cur); err != nil {
+		panic(err)
 	}
 	if prev != nil {
 		if err := res.Merge(prev); err != nil {
@@ -352,9 +431,17 @@ func (eb *estimatorBucket) estimateSketch(cur, prev, res *hyperloglog.Sketch) {
 }
 
 func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
-	sk, err := hyperloglog.NewSketch(eb.precision, eb.sparse)
+	return mustNewSketch(eb.precision, eb.sparse)
+}
+
+func mustNewGroupRejectSketch() *hyperloglog.Sketch {
+	return mustNewSketch(10, true)
+}
+
+func mustNewSketch(precision uint8, sparse bool) *hyperloglog.Sketch {
+	sk, err := hyperloglog.NewSketch(precision, sparse)
 	if err != nil {
-		panic(fmt.Sprintf("cannot create HLL sketch with precision=%d and sparse=%v: %s", eb.precision, eb.sparse, err))
+		panic(fmt.Sprintf("cannot create HLL sketch with precision=%d and sparse=%v: %s", precision, sparse, err))
 	}
 
 	return sk
@@ -362,4 +449,8 @@ func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
 
 func hash(v []byte) uint64 {
 	return metro.Hash64(v, 1337)
+}
+
+func b2s(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
