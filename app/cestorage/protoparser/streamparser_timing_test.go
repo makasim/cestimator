@@ -11,7 +11,7 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
 )
 
-func BenchmarkStreamParse(b *testing.B) {
+func BenchmarkParse(b *testing.B) {
 	data := buildSnappyEncodedWriteRequest(20_000, 20, 20, 3)
 	groupLabels := []string{
 		"foo",
