@@ -22,7 +22,7 @@ type Filter struct {
 	bits     []uint64
 }
 
-func NewFilter(maxItems int, refreshDur time.Duration) *Filter {
+func New(maxItems int, refreshDur time.Duration) *Filter {
 	bitsCount := maxItems * bitsPerItem
 	bits := make([]uint64, (bitsCount+63)/64)
 	return &Filter{
@@ -32,7 +32,7 @@ func NewFilter(maxItems int, refreshDur time.Duration) *Filter {
 	}
 }
 
-func (f *Filter) filter(srcTss, resTss []prompb.TimeSeries) []prompb.TimeSeries {
+func (f *Filter) Filter(srcTss, resTss []prompb.TimeSeries) []prompb.TimeSeries {
 	select {
 	case <-f.rt.C:
 		f.partialReset()
@@ -51,6 +51,10 @@ func (f *Filter) filter(srcTss, resTss []prompb.TimeSeries) []prompb.TimeSeries 
 	}
 
 	return resTss
+}
+
+func (f *Filter) Stop() {
+	f.rt.Stop()
 }
 
 // partialReset clears 1/resetParts of the bits on each call.
