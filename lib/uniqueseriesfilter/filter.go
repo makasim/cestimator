@@ -1,4 +1,4 @@
-package cardinalityfilter
+package uniqueseriesfilter
 
 import (
 	"sync/atomic"
