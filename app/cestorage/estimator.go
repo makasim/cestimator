@@ -9,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/cgroup"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/axiomhq/hyperloglog"
@@ -110,8 +110,8 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 		if len(cfg.GroupBy) == 0 {
 			eb.sketch = eb.newSketch()
 		} else {
-			eb.groups = make(map[string]*hyperloglog.Sketch)
-			eb.prevGroups = make(map[string]*hyperloglog.Sketch)
+			eb.groups = make(map[string]groupSketch)
+			eb.prevGroups = make(map[string]groupSketch)
 
 			e.metricsSet.NewGauge(fmt.Sprintf(`cestorage_estimator_group_size{group_by_keys=%q,bucket="%d"}`, eb.groupByKeysLabel, i), func() float64 {
 				return float64(eb.groupSize.Load())
@@ -138,7 +138,7 @@ func (e *estimator) stop() {
 
 var groupValuesPool = sync.Pool{}
 
-func getGroupValuesSlice() []byte {
+func getGroupValuesKeySlice() []byte {
 	v0 := groupValuesPool.Get()
 	if v0 == nil {
 		return nil
@@ -155,30 +155,33 @@ func putGroupValuesSlice(key []byte) {
 func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
 	bucketsNum := uint64(len(e.buckets))
 
-	groupValues := getGroupValuesSlice()
-	defer putGroupValuesSlice(groupValues)
+	groupValuesKey := getGroupValuesKeySlice()
+	defer putGroupValuesSlice(groupValuesKey)
+
+	groupValues := make([]string, len(e.groupBy))
 
 	var cnt int
 	for _, ts := range tss {
-		groupValues = groupValues[:0]
-
 		if len(e.groupBy) == 0 {
 			i := int(ts.Fingerprint % bucketsNum)
-			e.buckets[i].insert(ts, "")
+			e.buckets[i].insert(ts, "", nil)
 			continue
 		}
 
+		groupValuesKey = groupValuesKey[:0]
+		clear(groupValues)
 		var hasNames bool
 		for i, labelName := range e.groupBy {
 			if i > 0 {
-				groupValues = append(groupValues, ',')
+				groupValuesKey = append(groupValuesKey, ',')
 			}
 
 			for _, l := range ts.GroupLabels {
 				if l.Name == labelName {
 					hasNames = true
 
-					groupValues = append(groupValues, l.Value...)
+					groupValuesKey = append(groupValuesKey, l.Value...)
+					groupValues[i] = l.Value
 					break
 				}
 			}
@@ -189,8 +192,8 @@ func (e *estimator) insertMany(tss []protoparser.TimeSerie) {
 			continue
 		}
 
-		i := int(hash(groupValues) % bucketsNum)
-		e.buckets[i].insert(ts, b2s(groupValues))
+		i := int(hash(groupValuesKey) % bucketsNum)
+		e.buckets[i].insert(ts, bytesutil.ToUnsafeString(groupValuesKey), groupValues)
 		cnt++
 	}
 
@@ -226,8 +229,14 @@ func (e *estimator) writeMetrics(w io.Writer) {
 		return
 	}
 
-	for _, b := range e.buckets {
-		b.writeGroupMetrics(w, formatBuf, eb0.groupByKeysLabel)
+	groupMetricPrefix := formatBuf[:0]
+	groupMetricPrefix = append(groupMetricPrefix, eb0.metricPrefix...)
+	groupMetricPrefix = append(groupMetricPrefix, `,group_by_keys="`...)
+	groupMetricPrefix = append(groupMetricPrefix, eb0.groupByKeysLabel...)
+	groupMetricPrefix = append(groupMetricPrefix, `",group_by_values=`...)
+
+	for _, eb := range e.buckets {
+		eb.writeGroupMetrics(w, groupMetricPrefix)
 	}
 
 	groupSize := e.groupSize.Load()
@@ -297,8 +306,8 @@ type estimatorBucket struct {
 	prevSketch *hyperloglog.Sketch
 
 	groupSize  *atomic.Int64
-	groups     map[string]*hyperloglog.Sketch
-	prevGroups map[string]*hyperloglog.Sketch
+	groups     map[string]groupSketch
+	prevGroups map[string]groupSketch
 
 	groupRejectedMu     *sync.Mutex
 	groupRejectedSketch *hyperloglog.Sketch
@@ -337,13 +346,13 @@ func (eb *estimatorBucket) rotate() {
 
 	eb.mu.Lock()
 	eb.prevGroups = eb.groups
-	eb.groups = make(map[string]*hyperloglog.Sketch, len(eb.groups))
+	eb.groups = make(map[string]groupSketch, len(eb.groups))
 	eb.mu.Unlock()
 
 	eb.groupSize.Add(int64(len(eb.prevGroups)))
 }
 
-func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValues string) {
+func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValuesKey string, groupValues []string) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
@@ -352,13 +361,13 @@ func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValues string) 
 		return
 	}
 
-	sk := eb.groups[groupValues]
-	if sk == nil {
-		if eb.prevGroups[groupValues] == nil {
+	gsk, ok := eb.groups[groupValuesKey]
+	if !ok {
+		if _, ok := eb.prevGroups[groupValuesKey]; !ok {
 			groupSize := eb.groupSize.Load()
 			if groupSize+1 > eb.groupLimit {
 				eb.groupRejectedMu.Lock()
-				eb.groupRejectedSketch.InsertHash(hash([]byte(groupValues)))
+				eb.groupRejectedSketch.InsertHash(hash([]byte(groupValuesKey)))
 				eb.groupRejectedMu.Unlock()
 				return
 			}
@@ -366,56 +375,72 @@ func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValues string) 
 			eb.groupSize.Add(1)
 		}
 
-		sk = eb.newSketch()
-		eb.groups[strings.Clone(groupValues)] = sk
+		formatBuf := make([]byte, 0, 1024)
+		formatBuf = strconv.AppendQuote(formatBuf, groupValuesKey)
+		for i := range groupValues {
+			formatBuf = append(formatBuf, ',')
+			if eb.groupBy[i] == `__name__` {
+				formatBuf = append(formatBuf, `by__name__`...)
+			} else {
+				formatBuf = append(formatBuf, `by_`...)
+				formatBuf = append(formatBuf, eb.groupBy[i]...)
+			}
+			formatBuf = append(formatBuf, '=')
+			formatBuf = strconv.AppendQuote(formatBuf, groupValues[i])
+		}
+		formatBuf = append(formatBuf, `} `...)
+
+		gsk = groupSketch{
+			groupValueLabels: bytesutil.ToUnsafeString(formatBuf),
+
+			Sketch: eb.newSketch(),
+		}
+
+		eb.groups[strings.Clone(groupValuesKey)] = gsk
 	}
-	sk.InsertHash(ts.Fingerprint)
+	gsk.InsertHash(ts.Fingerprint)
 }
 
 func (eb *estimatorBucket) writeNoGroupMetric(res *hyperloglog.Sketch) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
-	eb.estimateSketch(eb.sketch, eb.prevSketch, res)
+	eb.mergeSketches(eb.sketch, eb.prevSketch, res)
 	return
 }
 
-func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, formatBuf []byte, groupByKey string) {
+func (eb *estimatorBucket) writeGroupMetrics(w io.Writer, groupMetricPrefix []byte) {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
 
-	res := eb.newSketch()
-	for groupByVal := range eb.groups {
-		res.Reset()
-		formatBuf = formatBuf[:0]
+	prefixLen := len(groupMetricPrefix)
 
-		eb.estimateSketch(eb.groups[groupByVal], eb.prevGroups[groupByVal], res)
-		formatBuf = append(formatBuf, eb.metricPrefix...)
-		formatBuf = append(formatBuf, `,group_by_keys="`...)
-		formatBuf = append(formatBuf, groupByKey...)
-		formatBuf = append(formatBuf, `",group_by_values="`...)
-		formatBuf = append(formatBuf, groupByVal...)
-		formatBuf = append(formatBuf, `"} `...)
+	res := eb.newSketch()
+	for valuesKey, gsk := range eb.groups {
+		res.Reset()
+		formatBuf := groupMetricPrefix[:prefixLen]
+
+		formatBuf = append(formatBuf, gsk.groupValueLabels...)
+
+		eb.mergeSketches(gsk.Sketch, eb.prevGroups[valuesKey].Sketch, res)
 		formatBuf = strconv.AppendUint(formatBuf, res.Estimate(), 10)
 		formatBuf = append(formatBuf, "\n"...)
 		w.Write(formatBuf)
 	}
 
-	for groupByVal := range eb.prevGroups {
-		if _, ok := eb.groups[groupByVal]; ok {
+	for valuesKey, _ := range eb.prevGroups {
+		if _, ok := eb.groups[valuesKey]; ok {
+
 			continue
 		}
 
 		res.Reset()
-		formatBuf = formatBuf[:0]
+		formatBuf := groupMetricPrefix[:prefixLen]
 
-		eb.estimateSketch(nil, eb.prevGroups[groupByVal], res)
-		formatBuf = append(formatBuf, eb.metricPrefix...)
-		formatBuf = append(formatBuf, `,group_by_keys="`...)
-		formatBuf = append(formatBuf, groupByKey...)
-		formatBuf = append(formatBuf, `",group_by_values="`...)
-		formatBuf = append(formatBuf, groupByVal...)
-		formatBuf = append(formatBuf, `"} `...)
+		gsk := eb.prevGroups[valuesKey]
+		formatBuf = append(formatBuf, gsk.groupValueLabels...)
+
+		eb.mergeSketches(nil, eb.prevGroups[valuesKey].Sketch, res)
 		formatBuf = strconv.AppendUint(formatBuf, res.Estimate(), 10)
 		formatBuf = append(formatBuf, "\n"...)
 		w.Write(formatBuf)
@@ -428,7 +453,7 @@ func (eb *estimatorBucket) ensureKeySet(res map[string]*hyperloglog.Sketch, key 
 	}
 }
 
-func (eb *estimatorBucket) estimateSketch(cur, prev, res *hyperloglog.Sketch) {
+func (eb *estimatorBucket) mergeSketches(cur, prev, res *hyperloglog.Sketch) {
 	if err := res.Merge(cur); err != nil {
 		panic(err)
 	}
@@ -441,6 +466,12 @@ func (eb *estimatorBucket) estimateSketch(cur, prev, res *hyperloglog.Sketch) {
 
 func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
 	return mustNewSketch(eb.precision, eb.sparse)
+}
+
+type groupSketch struct {
+	groupValueLabels string
+
+	*hyperloglog.Sketch
 }
 
 func mustNewGroupRejectSketch() *hyperloglog.Sketch {
@@ -458,8 +489,4 @@ func mustNewSketch(precision uint8, sparse bool) *hyperloglog.Sketch {
 
 func hash(v []byte) uint64 {
 	return metro.Hash64(v, 1337)
-}
-
-func b2s(b []byte) string {
-	return unsafe.String(unsafe.SliceData(b), len(b))
 }

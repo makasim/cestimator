@@ -73,16 +73,16 @@ All metrics include `interval`, `group_by_keys`, and `group_by_values` labels. E
 cardinality_estimate{interval="1h0m0s",group_by_keys="__global__"} 142300
 ```
 
-**With grouping** — one summary line (total distinct group count) plus one line per distinct label value combination:
+**With grouping** — one summary line (total distinct group count) plus one line per distinct label value combination. Each per-group line also includes individual `by_{key}="{val}"` labels for each group key:
 ```
 cardinality_estimate{interval="5m0s",group_by_keys="__group__",group_by_values="instance,job"} 2
-cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_values="host1:9090,prometheus"} 312
-cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_values="host2:9100,node"} 87
+cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_values="host1:9090,prometheus",by_instance="host1:9090",by_job="prometheus"} 312
+cardinality_estimate{interval="5m0s",group_by_keys="instance,job",group_by_values="host2:9100,node",by_instance="host2:9100",by_job="node"} 87
 ```
 
 **With extra labels:**
 ```
-cardinality_estimate{interval="5m0s",env="production",region="eu-central-1",group_by_keys="job",group_by_values="prometheus"} 312
+cardinality_estimate{interval="5m0s",env="production",region="eu-central-1",group_by_keys="job",group_by_values="prometheus",by_job="prometheus"} 312
 ```
 
 ## Operational metrics
