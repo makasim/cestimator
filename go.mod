@@ -12,6 +12,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.43.1
 	github.com/VictoriaMetrics/metricsql v0.86.0
 	github.com/axiomhq/hyperloglog v0.2.6
+	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dgryski/go-metro v0.0.0-20250106013310-edb8663e5e33
 	github.com/golang/snappy v1.0.0
 	gopkg.in/yaml.v2 v2.4.0

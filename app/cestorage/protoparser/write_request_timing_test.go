@@ -48,6 +48,12 @@ func BenchmarkWriteRequest_UnmarshalProtobuf(b *testing.B) {
 	f(5_000, 20, 20, 3)
 	f(10_000, 20, 20, 3)
 	f(20_000, 20, 20, 3)
+
+	// long label values
+	f(1_000, 20, 2000, 3)
+
+	// many labels
+	f(1_000, 2000, 100, 3)
 }
 
 // buildEncodedWriteRequest builds a snappy-encoded protobuf WriteRequest

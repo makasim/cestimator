@@ -5,8 +5,9 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/easyproto"
-	"github.com/dgryski/go-metro"
+	"github.com/cespare/xxhash/v2"
 )
 
 type TimeSerie struct {
@@ -25,7 +26,7 @@ func getWriteRequestUnmarshaler() *writeRequestUnmarshaler {
 		return &writeRequestUnmarshaler{
 			tss:        make([]TimeSerie, 0, 1024),
 			labelsPool: make([]Label, 0, 4096),
-			fpBuf:      make([]byte, 0, 4096),
+			d:          xxhash.New(),
 		}
 	}
 	return v.(*writeRequestUnmarshaler)
@@ -44,16 +45,15 @@ var wruPool sync.Pool
 // See UnmarshalProtobuf for details on how to use it.
 type writeRequestUnmarshaler struct {
 	tss        []TimeSerie
-	fpBuf      []byte
 	labelsPool []Label
+	d          *xxhash.Digest
 }
 
 // Reset resets wru, so it could be re-used.
 func (wru *writeRequestUnmarshaler) Reset() {
-	wru.fpBuf = wru.fpBuf[:0]
 	wru.tss = wru.tss[:0]
 	wru.labelsPool = wru.labelsPool[:0]
-
+	wru.d.Reset()
 }
 
 func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels []string, callback func(tss []TimeSerie)) error {
@@ -69,7 +69,6 @@ func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels []
 	//    repeated Metadata metadata = 3;
 	// }
 	labelsPool := wru.labelsPool
-	fpBuf := wru.fpBuf
 	var fc easyproto.FieldContext
 	for len(src) > 0 {
 		if len(tss) >= cap(tss) {
@@ -90,7 +89,9 @@ func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels []
 			}
 			tss = tss[:len(tss)+1]
 			ts := &tss[len(tss)-1]
-			labelsPool, fpBuf, err = ts.unmarshalProtobuf(data, groupLabels, labelsPool, fpBuf)
+			d := wru.d
+			d.Reset()
+			labelsPool, err = ts.unmarshalProtobuf(data, groupLabels, labelsPool, d)
 			if err != nil {
 				return fmt.Errorf("cannot unmarshal timeseries: %w", err)
 			}
@@ -105,85 +106,65 @@ func (wru *writeRequestUnmarshaler) UnmarshalProtobuf(src []byte, groupLabels []
 
 	wru.tss = tss[:0]
 	wru.labelsPool = labelsPool
-	wru.fpBuf = fpBuf
+	wru.d.Reset()
 	return nil
 }
 
-func (ts *TimeSerie) unmarshalProtobuf(src []byte, groupLabels []string, labelsPool []Label, fpBuf []byte) ([]Label, []byte, error) {
+func (ts *TimeSerie) unmarshalProtobuf(src []byte, groupLabels []string, labelsPool []Label, d *xxhash.Digest) ([]Label, error) {
 	// message TimeSeries {
 	//   repeated Label labels   = 1;
 	//   repeated Sample samples = 2;
 	// }
-	fpBuf = fpBuf[:0]
 
 	labelsPoolLen := len(labelsPool)
 	var fc easyproto.FieldContext
+	var nameBytes, valueBytes []byte
+	var lfc easyproto.FieldContext
 	for len(src) > 0 {
 		var err error
 		src, err = fc.NextField(src)
 		if err != nil {
-			return labelsPool, fpBuf, fmt.Errorf("cannot read the next field: %w", err)
+			return labelsPool, fmt.Errorf("cannot read the next field: %w", err)
 		}
 		switch fc.FieldNum {
 		case 1:
 			data, ok := fc.MessageData()
 			if !ok {
-				return labelsPool, fpBuf, fmt.Errorf("cannot read label data")
-			}
-			if len(labelsPool) < cap(labelsPool) {
-				labelsPool = labelsPool[:len(labelsPool)+1]
-			} else {
-				labelsPool = append(labelsPool, Label{})
-			}
-			label := &labelsPool[len(labelsPool)-1]
-			if err := label.unmarshalProtobuf(data); err != nil {
-				return labelsPool, fpBuf, fmt.Errorf("cannot unmarshal label: %w", err)
+				return labelsPool, fmt.Errorf("cannot read label data")
 			}
 
-			fpBuf = append(fpBuf, label.Name...)
-			fpBuf = append(fpBuf, 0x00)
-			fpBuf = append(fpBuf, label.Value...)
-			fpBuf = append(fpBuf, 0x00)
+			ldata := data
+			for len(ldata) > 0 {
+				ldata, err = lfc.NextField(ldata)
+				if err != nil {
+					return labelsPool, fmt.Errorf("cannot read label field: %w", err)
+				}
+				switch lfc.FieldNum {
+				case 1:
+					nameBytes, ok = lfc.Bytes()
+					if !ok {
+						return labelsPool, fmt.Errorf("cannot read label name")
+					}
+				case 2:
+					valueBytes, ok = lfc.Bytes()
+					if !ok {
+						return labelsPool, fmt.Errorf("cannot read label value")
+					}
+				}
+			}
 
-			if !slices.Contains(groupLabels, label.Name) {
-				labelsPool = labelsPool[:len(labelsPool)-1]
+			_, _ = d.Write(data)
+
+			name := bytesutil.ToUnsafeString(nameBytes)
+			if slices.Contains(groupLabels, name) {
+				labelsPool = append(labelsPool, Label{
+					Name:  name,
+					Value: bytesutil.ToUnsafeString(valueBytes),
+				})
 			}
 		}
 	}
 	ts.GroupLabels = labelsPool[labelsPoolLen:]
-	ts.Fingerprint = fingerprint(fpBuf)
-	return labelsPool, fpBuf, nil
-}
-
-func (lbl *Label) unmarshalProtobuf(src []byte) (err error) {
-	// message Label {
-	//   string name  = 1;
-	//   string value = 2;
-	// }
-	var fc easyproto.FieldContext
-	for len(src) > 0 {
-		src, err = fc.NextField(src)
-		if err != nil {
-			return fmt.Errorf("cannot read the next field: %w", err)
-		}
-		switch fc.FieldNum {
-		case 1:
-			name, ok := fc.String()
-			if !ok {
-				return fmt.Errorf("cannot read label name")
-			}
-			lbl.Name = name
-		case 2:
-			value, ok := fc.String()
-			if !ok {
-				return fmt.Errorf("cannot read label value")
-			}
-			lbl.Value = value
-		}
-	}
-	return nil
-}
-
-func fingerprint(v []byte) uint64 {
-	return metro.Hash64(v, 1337)
+	ts.Fingerprint = d.Sum64()
+	return labelsPool, nil
 }
