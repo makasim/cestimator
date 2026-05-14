@@ -121,10 +121,10 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 			})
 		}
 
-		go e.runRotation(cfg.Interval)
-
 		e.buckets[i] = eb
 	}
+
+	go e.runRotation(cfg.Interval)
 
 	metrics.RegisterSet(e.metricsSet)
 
