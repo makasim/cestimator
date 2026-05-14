@@ -45,6 +45,9 @@ github.com/VictoriaMetrics/metricsql/binaryop
 # github.com/axiomhq/hyperloglog v0.2.6 => github.com/makasim/hyperloglog v0.0.1-reuse-memory
 ## explicit; go 1.23
 github.com/axiomhq/hyperloglog
+# github.com/cespare/xxhash/v2 v2.3.0
+## explicit; go 1.11
+github.com/cespare/xxhash/v2
 # github.com/dgryski/go-metro v0.0.0-20250106013310-edb8663e5e33
 ## explicit
 github.com/dgryski/go-metro

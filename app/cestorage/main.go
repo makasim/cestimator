@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/buildinfo"
@@ -23,7 +24,6 @@ var (
 	configPath      = flag.String("config", "config.yaml", "Path to YAML configuration file")
 
 	prometheusWriteRequests = metrics.NewCounter(`cestorage_http_requests_total{path="/api/v1/write", protocol="promremotewrite"}`)
-	rowsInserted            = metrics.NewCounter(`cestorage_rows_inserted_total{type="promremotewrite"}`)
 )
 
 func main() {
@@ -74,25 +74,20 @@ func main() {
 
 	go httpserver.Serve(listenAddrs, func(w http.ResponseWriter, r *http.Request) bool {
 		cmPath := *cardinalityMetricsExposeAt
-
 		if cmPath != "/metrics" && cmPath != "" && r.URL.Path == cmPath {
 			w.WriteHeader(http.StatusOK)
 			writeCardinalityMetrics(w, estimators)
 			return true
 		}
 
-		switch r.URL.Path {
+		path, _ := strings.CutPrefix(r.URL.Path, `/cardinality`)
+		switch path {
 		case "/api/v1/write":
 			prometheusWriteRequests.Inc()
 			err := protoparser.Parse(r.Body, groupLabels, func(tss []protoparser.TimeSerie) {
-				//var wg sync.WaitGroup
 				for _, e := range estimators {
-					//wg.Go(func() {
 					e.insertMany(tss)
-					//})
 				}
-				//wg.Wait()
-				rowsInserted.Add(len(tss))
 			})
 			if err != nil {
 				httpserver.Errorf(w, r, "error parsing remote write request: %s", err)
@@ -100,7 +95,7 @@ func main() {
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return true
-		case "/cardinality/reset":
+		case "/reset":
 			for _, e := range estimators {
 				e.reset()
 			}
