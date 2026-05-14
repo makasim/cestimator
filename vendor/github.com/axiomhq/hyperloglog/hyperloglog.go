@@ -78,7 +78,14 @@ func (sk *Sketch) Clone() *Sketch {
 
 func (sk *Sketch) Reset() {
 	sk.tmpSet.reset()
-	sk.sparseList.reset()
+
+	if cap(sk.sparseList.b) < 5000 {
+		sk.sparseList.reset()
+	} else {
+		putCompressedList(sk.sparseList)
+		sk.sparseList = newCompressedList(0)
+	}
+
 	clear(sk.regs)
 	sk.regs = sk.regs[:0]
 }
@@ -194,7 +201,9 @@ func getCompressedList(capacity int) *compressedList {
 		return newCompressedList(capacity)
 	}
 
-	return c.(*compressedList)
+	cl := c.(*compressedList)
+	cl.b = slices.Grow(cl.b, capacity)
+	return cl
 }
 
 func putCompressedList(c *compressedList) {
