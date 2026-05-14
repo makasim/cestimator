@@ -1580,7 +1580,7 @@
             "uid": "$ds"
           },
           "editorMode": "code",
-          "expr": "max(\n  rate(go_gc_cpu_seconds_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]) \n / rate(process_cpu_seconds_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])\n ) by(job)",
+          "expr": "max(\n  rate(go_gc_cpu_seconds_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]) \n / rate(process_cpu_seconds_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])\n ) by(job,instance)",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 2,
@@ -1686,7 +1686,7 @@
             "uid": "$ds"
           },
           "editorMode": "code",
-          "expr": "max(rate(go_memstats_alloc_bytes_total{job=~\"$job\"}[$__rate_interval])) by (job)",
+          "expr": "max(rate(go_memstats_alloc_bytes_total{job=~\"$job\",instance=~\"$instance\"}[$__rate_interval])) by (job,instance)",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 2,
@@ -1708,8 +1708,8 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "sandbox-monitoring",
-          "value": "PB894574A363DF0AF"
+          "text": "prometheus",
+          "value": "P1809F7CD0C75ACF3"
         },
         "name": "ds",
         "options": [],
@@ -1749,9 +1749,11 @@
       {
         "allowCustomValue": false,
         "current": {
-          "text": "All",
+          "text": [
+            "192.168.50.102:8490"
+          ],
           "value": [
-            "$__all"
+            "192.168.50.102:8490"
           ]
         },
         "datasource": {
@@ -1784,6 +1786,6 @@
   "timezone": "utc",
   "title": "cestimator",
   "uid": "mkv22l4",
-  "version": 19,
+  "version": 20,
   "weekStart": ""
 }
