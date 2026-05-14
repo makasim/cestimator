@@ -19,8 +19,6 @@ import (
 	"github.com/makasim/cestimator/app/cestorage/protoparser"
 )
 
-var skpp = hyperloglog.NewSketchPoolPool()
-
 type estimator struct {
 	groupBy          []string
 	groupByKeysLabel string
@@ -32,6 +30,8 @@ type estimator struct {
 	groupRejectedSketchPrev *hyperloglog.Sketch
 
 	buckets []*estimatorBucket
+
+	skp *hyperloglog.SketchPool
 
 	metricsSet  *metrics.Set
 	insertTotal *metrics.Counter
@@ -82,6 +82,8 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 		buckets:                 make([]*estimatorBucket, cfg.Buckets),
 		metricsSet:              metrics.NewSet(),
 		stopCh:                  make(chan struct{}),
+
+		skp: hyperloglog.NewSketchPool(cfg.HLLPrecision, *cfg.HLLSparse),
 	}
 
 	e.insertTotal = e.metricsSet.NewCounter(
@@ -107,6 +109,8 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 
 			precision: cfg.HLLPrecision,
 			sparse:    *cfg.HLLSparse,
+
+			skp: e.skp,
 		}
 
 		if len(cfg.GroupBy) == 0 {
@@ -313,6 +317,8 @@ type estimatorBucket struct {
 
 	groupRejectedMu     *sync.Mutex
 	groupRejectedSketch *hyperloglog.Sketch
+
+	skp *hyperloglog.SketchPool
 }
 
 func (eb *estimatorBucket) String() string {
@@ -346,7 +352,7 @@ func (eb *estimatorBucket) rotate() {
 		eb.sketch = eb.newSketch()
 		eb.mu.Unlock()
 
-		skpp.MustPut(prevSketch)
+		eb.skp.MustPut(prevSketch)
 
 		return
 	}
@@ -360,7 +366,7 @@ func (eb *estimatorBucket) rotate() {
 	eb.mu.Unlock()
 
 	for k := range prevGroups {
-		skpp.MustPut(prevGroups[k].Sketch)
+		eb.skp.MustPut(prevGroups[k].Sketch)
 	}
 }
 
@@ -477,7 +483,7 @@ func (eb *estimatorBucket) mergeSketches(cur, prev, res *hyperloglog.Sketch) {
 }
 
 func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
-	return mustNewSketch(eb.precision, eb.sparse)
+	return eb.skp.MustGet()
 }
 
 type groupSketch struct {
@@ -491,7 +497,12 @@ func mustNewGroupRejectSketch() *hyperloglog.Sketch {
 }
 
 func mustNewSketch(precision uint8, sparse bool) *hyperloglog.Sketch {
-	return skpp.MustGet(precision, sparse)
+	sk, err := hyperloglog.NewSketch(precision, sparse)
+	if err != nil {
+		panic(err)
+	}
+
+	return sk
 }
 
 func hash(v []byte) uint64 {
