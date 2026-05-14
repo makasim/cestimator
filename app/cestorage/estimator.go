@@ -19,6 +19,8 @@ import (
 	"github.com/makasim/cestimator/app/cestorage/protoparser"
 )
 
+var skpp = hyperloglog.NewSketchPoolPool()
+
 type estimator struct {
 	groupBy          []string
 	groupByKeysLabel string
@@ -103,9 +105,8 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 			groupRejectedMu:     &e.groupRejectedMu,
 			groupRejectedSketch: e.groupRejectedSketch,
 
-			sketchPool: make([]*hyperloglog.Sketch, 0, 2000),
-			precision:  cfg.HLLPrecision,
-			sparse:     *cfg.HLLSparse,
+			precision: cfg.HLLPrecision,
+			sparse:    *cfg.HLLSparse,
 		}
 
 		if len(cfg.GroupBy) == 0 {
@@ -306,9 +307,6 @@ type estimatorBucket struct {
 	sketch     *hyperloglog.Sketch
 	prevSketch *hyperloglog.Sketch
 
-	sketchPoolMu sync.Mutex
-	sketchPool   []*hyperloglog.Sketch
-
 	groupSize  *atomic.Int64
 	groups     map[string]groupSketch
 	prevGroups map[string]groupSketch
@@ -341,25 +339,35 @@ func (eb *estimatorBucket) reset() {
 
 func (eb *estimatorBucket) rotate() {
 	if len(eb.groupBy) == 0 {
+		var prevSketch *hyperloglog.Sketch
 		eb.mu.Lock()
+		prevSketch = eb.prevSketch
 		eb.prevSketch = eb.sketch
 		eb.sketch = eb.newSketch()
 		eb.mu.Unlock()
+
+		skpp.MustPut(prevSketch)
+
 		return
 	}
 
+	var prevGroups map[string]groupSketch
 	eb.mu.Lock()
+	prevGroups = eb.prevGroups
 	eb.prevGroups = eb.groups
 	eb.groups = make(map[string]groupSketch, len(eb.groups))
+	eb.groupSize.Add(int64(len(eb.prevGroups)))
 	eb.mu.Unlock()
 
-	eb.groupSize.Add(int64(len(eb.prevGroups)))
+	for k := range prevGroups {
+		skpp.MustPut(prevGroups[k].Sketch)
+	}
 }
 
 func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValuesKey string, groupValues []string) {
 	eb.mu.Lock()
+	defer eb.mu.Unlock()
 
-	var prevSK *hyperloglog.Sketch
 	if len(eb.groupBy) == 0 {
 		eb.sketch.InsertHash(ts.Fingerprint)
 		return
@@ -469,9 +477,6 @@ func (eb *estimatorBucket) mergeSketches(cur, prev, res *hyperloglog.Sketch) {
 }
 
 func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
-	if sk := eb.getSketch(); sk != nil {
-		return sk
-	}
 	return mustNewSketch(eb.precision, eb.sparse)
 }
 
@@ -486,33 +491,7 @@ func mustNewGroupRejectSketch() *hyperloglog.Sketch {
 }
 
 func mustNewSketch(precision uint8, sparse bool) *hyperloglog.Sketch {
-	sk, err := hyperloglog.NewSketch(precision, sparse)
-	if err != nil {
-		panic(fmt.Sprintf("cannot create HLL sketch with precision=%d and sparse=%v: %s", precision, sparse, err))
-	}
-	return sk
-}
-
-func (eb *estimatorBucket) getSketch() *hyperloglog.Sketch {
-	eb.sketchPoolMu.Lock()
-	defer eb.sketchPoolMu.Unlock()
-
-	if n := len(eb.sketchPool); n > 0 {
-		sk := eb.sketchPool[n-1]
-		eb.sketchPool[n-1] = nil
-		eb.sketchPool = eb.sketchPool[:n-1]
-		return sk
-	}
-	return nil
-}
-
-func (eb *estimatorBucket) putSketchLocked(sk *hyperloglog.Sketch) bool {
-	if len(eb.sketchPool) >= cap(eb.sketchPool) {
-		return false
-	}
-	sk.Reset()
-	eb.sketchPool = append(eb.sketchPool, sk)
-	return true
+	return skpp.MustGet(precision, sparse)
 }
 
 func hash(v []byte) uint64 {
