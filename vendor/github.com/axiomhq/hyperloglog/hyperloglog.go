@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"slices"
 	"sync"
 )
@@ -17,11 +18,14 @@ const (
 
 type Sketch struct {
 	p          uint8
+	s          bool
 	m          uint32
 	alpha      float64
 	tmpSet     set
 	sparseList *compressedList
 	regs       []uint8
+
+	keys []uint32
 }
 
 // New returns a HyperLogLog Sketch with 2^14 registers (precision 14)
@@ -51,14 +55,17 @@ func NewSketch(precision uint8, sparse bool) (*Sketch, error) {
 	m := uint32(1) << precision
 	s := &Sketch{
 		m:     m,
+		s:     sparse,
 		p:     precision,
 		alpha: alpha(float64(m)),
 	}
 	if sparse {
 		s.tmpSet = makeSet(0)
-		s.sparseList = newCompressedList(0)
+		s.sparseList = getCompressedList(0)
+
+		s.keys = make([]uint32, 0, 200)
 	} else {
-		s.regs = make([]uint8, m)
+		s.regs = defRegsPool.get(precision)
 	}
 	return s, nil
 }
@@ -75,10 +82,27 @@ func (sk *Sketch) Clone() *Sketch {
 }
 
 func (sk *Sketch) Reset() {
-	sk.tmpSet.reset()
-	sk.sparseList.reset()
-	
+	if sk.s {
+		sk.tmpSet = makeSet(0)
+		putCompressedList(sk.sparseList)
+		sk.sparseList = getCompressedList(0)
+
+		defRegsPool.put(sk.regs)
+		sk.regs = nil
+
+		sk.keys = make([]uint32, 0, 200)
+
+		return
+	}
+
 	clear(sk.regs)
+}
+
+func (sk *Sketch) Recycle() {
+	putCompressedList(sk.sparseList)
+	sk.sparseList = nil
+	defRegsPool.put(sk.regs)
+	sk.regs = nil
 }
 
 func (sk *Sketch) maybeToNormal() {
@@ -142,14 +166,16 @@ func (sk *Sketch) toNormal() {
 		sk.mergeSparse()
 	}
 
-	sk.regs = make([]uint8, sk.m)
+	sk.regs = defRegsPool.get(sk.p)
 	for iter := sk.sparseList.Iter(); iter.HasNext(); {
 		i, r := decodeHash(iter.Next(), sk.p, pp)
 		sk.insert(i, r)
 	}
 
-	sk.tmpSet = nilSet
+	//sk.tmpSet = nilSet
+	putCompressedList(sk.sparseList)
 	sk.sparseList = nil
+	sk.keys = nil
 }
 
 func (sk *Sketch) insert(i uint32, r uint8) { sk.regs[i] = max(r, sk.regs[i]) }
@@ -179,28 +205,13 @@ func (sk *Sketch) Estimate() uint64 {
 	return uint64(est + 0.5)
 }
 
-var compressedListPool = sync.Pool{}
-
-func getCompressedList(capacity int) *compressedList {
-	c := compressedListPool.Get()
-	if c == nil {
-		return newCompressedList(capacity)
-	}
-
-	return c.(*compressedList)
-}
-
-func putCompressedList(c *compressedList) {
-	c.reset()
-	compressedListPool.Put(c)
-}
-
 func (sk *Sketch) mergeSparse() {
 	if sk.tmpSet.Len() == 0 {
 		return
 	}
 
-	keys := make([]uint32, 0, sk.tmpSet.Len())
+	keys := sk.keys[:0]
+	slices.Grow(keys, sk.tmpSet.Len())
 	sk.tmpSet.ForEach(func(k uint32) {
 		keys = append(keys, k)
 	})
@@ -377,4 +388,72 @@ func (sk *Sketch) unmarshalBinaryV1(data []byte, b uint8) error {
 func (sk *Sketch) unmarshalBinaryV2(data []byte) error {
 	sk.regs = data[8:]
 	return nil
+}
+
+var smallCompressedListPool = &sync.Pool{}
+var mediumCompressedListPool = &sync.Pool{}
+
+func getCompressedList(capacity int) *compressedList {
+	var pool *sync.Pool
+	if capacity < 1024 {
+		pool = smallCompressedListPool
+	} else if capacity < 8192 {
+		pool = mediumCompressedListPool
+	} else {
+		return newCompressedList(capacity)
+	}
+
+	c := pool.Get()
+	if c == nil {
+		return newCompressedList(capacity)
+	}
+
+	cl := c.(*compressedList)
+	cl.b = slices.Grow(cl.b, capacity)
+	return cl
+}
+
+func putCompressedList(c *compressedList) {
+	if c == nil {
+		return
+	}
+
+	c.reset()
+	if cap(c.b) < 1024 {
+		smallCompressedListPool.Put(c)
+	} else if cap(c.b) < 8192 {
+		mediumCompressedListPool.Put(c)
+	}
+}
+
+var defRegsPool = newRegsPool()
+
+type regsPool struct {
+	pp [15]*sync.Pool
+}
+
+func newRegsPool() *regsPool {
+	rp := &regsPool{}
+	for i := range rp.pp {
+		rp.pp[i] = &sync.Pool{}
+	}
+	return rp
+}
+
+func (rp *regsPool) get(precision uint8) []uint8 {
+	if regs := rp.pp[precision-4].Get(); regs != nil {
+		return regs.([]uint8)
+	}
+
+	return make([]uint8, 1<<precision)
+}
+
+func (rp *regsPool) put(regs []uint8) {
+	if regs == nil {
+		return
+	}
+
+	precision := bits.Len(uint(len(regs))) - 1
+	clear(regs)
+	rp.pp[precision-4].Put(regs)
 }

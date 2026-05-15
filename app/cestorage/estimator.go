@@ -349,11 +349,28 @@ func (eb *estimatorBucket) rotate() {
 		return
 	}
 
+	var prevGroups map[string]groupSketch
 	eb.mu.Lock()
+	prevGroups = eb.prevGroups
 	eb.prevGroups = eb.groups
 	eb.groups = make(map[string]groupSketch, len(eb.groups))
 	eb.groupSize.Add(int64(len(eb.prevGroups)))
+
+	var cnt int
+	for key, gsk := range prevGroups {
+		if cnt > 100 {
+			break
+		}
+
+		gsk.Sketch.Recycle()
+		delete(prevGroups, key)
+		cnt++
+	}
 	eb.mu.Unlock()
+
+	for _, gsk := range prevGroups {
+		gsk.Sketch.Recycle()
+	}
 }
 
 func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValuesKey string, groupValues []string) {
