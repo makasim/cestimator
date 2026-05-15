@@ -95,7 +95,9 @@ func (sk *Sketch) Reset() {
 		defRegsPool.put(sk.regs)
 		sk.regs = nil
 
-		sk.keys = make([]uint32, 0, 200)
+		if sk.keys == nil {
+			sk.keys = make([]uint32, 0, 200)
+		}
 
 		return
 	}
