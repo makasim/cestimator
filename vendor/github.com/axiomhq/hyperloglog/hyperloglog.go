@@ -83,7 +83,12 @@ func (sk *Sketch) Clone() *Sketch {
 
 func (sk *Sketch) Reset() {
 	if sk.s {
-		sk.tmpSet = makeSet(0)
+		if sk.tmpSet == nilSet {
+			sk.tmpSet = makeSet(0)
+		} else {
+			sk.tmpSet.reset()
+		}
+
 		putCompressedList(sk.sparseList)
 		sk.sparseList = getCompressedList(0)
 
@@ -172,7 +177,7 @@ func (sk *Sketch) toNormal() {
 		sk.insert(i, r)
 	}
 
-	//sk.tmpSet = nilSet
+	sk.tmpSet = nilSet
 	putCompressedList(sk.sparseList)
 	sk.sparseList = nil
 	sk.keys = nil
