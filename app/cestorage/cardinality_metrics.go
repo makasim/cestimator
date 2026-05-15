@@ -18,7 +18,7 @@ var (
 	cardinalityCacheMu         sync.Mutex
 	cardinalityMetricsCacheAt  time.Time
 	cardinalityMetricsCache    []byte
-	cardinalityMetricsCacheTTL = flag.Duration("cardinalityMetrics.cacheTTL", time.Minute, "Duration for caching cardinality metrics response")
+	cardinalityMetricsCacheTTL = flag.Duration("cardinalityMetrics.cacheTTL", time.Second*10, "Duration for caching cardinality metrics response")
 	cardinalityMetricsExposeAt = flag.String(`cardinalityMetrics.exposeAt`, `/metrics`, "HTTP path for exposing cardinality metrics. "+
 		"If set to the default /metrics, cardinality metrics are merged with regular metrics and exposed together. "+
 		"If set to a different path, only cardinality metrics are exposed at that endpoint. "+
