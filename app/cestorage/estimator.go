@@ -31,8 +31,6 @@ type estimator struct {
 
 	buckets []*estimatorBucket
 
-	skp *hyperloglog.SketchPool
-
 	metricsSet  *metrics.Set
 	insertTotal *metrics.Counter
 
@@ -82,8 +80,6 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 		buckets:                 make([]*estimatorBucket, cfg.Buckets),
 		metricsSet:              metrics.NewSet(),
 		stopCh:                  make(chan struct{}),
-
-		skp: hyperloglog.NewSketchPool(cfg.HLLPrecision, *cfg.HLLSparse),
 	}
 
 	e.insertTotal = e.metricsSet.NewCounter(
@@ -109,12 +105,11 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 
 			precision: cfg.HLLPrecision,
 			sparse:    *cfg.HLLSparse,
-
-			skp: e.skp,
 		}
 
 		if len(cfg.GroupBy) == 0 {
 			eb.sketch = eb.newSketch()
+			eb.prevSketch = eb.newSketch()
 		} else {
 			eb.groups = make(map[string]groupSketch)
 			eb.prevGroups = make(map[string]groupSketch)
@@ -317,8 +312,6 @@ type estimatorBucket struct {
 
 	groupRejectedMu     *sync.Mutex
 	groupRejectedSketch *hyperloglog.Sketch
-
-	skp *hyperloglog.SketchPool
 }
 
 func (eb *estimatorBucket) String() string {
@@ -332,6 +325,7 @@ func (eb *estimatorBucket) reset() {
 
 	if len(eb.groupBy) == 0 {
 		eb.sketch.Reset()
+		eb.prevSketch.Reset()
 		return
 	}
 
@@ -345,29 +339,21 @@ func (eb *estimatorBucket) reset() {
 
 func (eb *estimatorBucket) rotate() {
 	if len(eb.groupBy) == 0 {
-		var prevSketch *hyperloglog.Sketch
 		eb.mu.Lock()
-		prevSketch = eb.prevSketch
+		prevSketch := eb.prevSketch
+		prevSketch.Reset()
 		eb.prevSketch = eb.sketch
-		eb.sketch = eb.newSketch()
+		eb.sketch = prevSketch
 		eb.mu.Unlock()
-
-		eb.skp.MustPut(prevSketch)
 
 		return
 	}
 
-	var prevGroups map[string]groupSketch
 	eb.mu.Lock()
-	prevGroups = eb.prevGroups
 	eb.prevGroups = eb.groups
 	eb.groups = make(map[string]groupSketch, len(eb.groups))
 	eb.groupSize.Add(int64(len(eb.prevGroups)))
 	eb.mu.Unlock()
-
-	for k := range prevGroups {
-		eb.skp.MustPut(prevGroups[k].Sketch)
-	}
 }
 
 func (eb *estimatorBucket) insert(ts protoparser.TimeSerie, groupValuesKey string, groupValues []string) {
@@ -483,7 +469,7 @@ func (eb *estimatorBucket) mergeSketches(cur, prev, res *hyperloglog.Sketch) {
 }
 
 func (eb *estimatorBucket) newSketch() *hyperloglog.Sketch {
-	return eb.skp.MustGet()
+	return mustNewSketch(eb.precision, eb.sparse)
 }
 
 type groupSketch struct {

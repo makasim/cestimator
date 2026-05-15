@@ -16,7 +16,6 @@ const (
 )
 
 type Sketch struct {
-	s          bool
 	p          uint8
 	m          uint32
 	alpha      float64
@@ -51,21 +50,20 @@ func NewSketch(precision uint8, sparse bool) (*Sketch, error) {
 	}
 	m := uint32(1) << precision
 	s := &Sketch{
-		s:     sparse,
 		m:     m,
 		p:     precision,
 		alpha: alpha(float64(m)),
 	}
 	if sparse {
 		s.tmpSet = makeSet(0)
-		s.sparseList = getCompressedList(0)
+		s.sparseList = newCompressedList(0)
 	} else {
 		s.regs = make([]uint8, m)
 	}
 	return s, nil
 }
 
-func (sk *Sketch) sparse() bool { return len(sk.regs) == 0 }
+func (sk *Sketch) sparse() bool { return sk.sparseList != nil }
 
 // Clone returns a deep copy of sk.
 func (sk *Sketch) Clone() *Sketch {
@@ -78,16 +76,9 @@ func (sk *Sketch) Clone() *Sketch {
 
 func (sk *Sketch) Reset() {
 	sk.tmpSet.reset()
-
-	if cap(sk.sparseList.b) < 5000 {
-		sk.sparseList.reset()
-	} else {
-		putCompressedList(sk.sparseList)
-		sk.sparseList = newCompressedList(0)
-	}
-
+	sk.sparseList.reset()
+	
 	clear(sk.regs)
-	sk.regs = sk.regs[:0]
 }
 
 func (sk *Sketch) maybeToNormal() {
@@ -151,19 +142,14 @@ func (sk *Sketch) toNormal() {
 		sk.mergeSparse()
 	}
 
-	if cap(sk.regs) == 0 {
-		sk.regs = make([]uint8, sk.m)
-	} else {
-		sk.regs = sk.regs[:sk.m]
-	}
-
+	sk.regs = make([]uint8, sk.m)
 	for iter := sk.sparseList.Iter(); iter.HasNext(); {
 		i, r := decodeHash(iter.Next(), sk.p, pp)
 		sk.insert(i, r)
 	}
 
-	sk.tmpSet.reset()
-	sk.sparseList.reset()
+	sk.tmpSet = nilSet
+	sk.sparseList = nil
 }
 
 func (sk *Sketch) insert(i uint32, r uint8) { sk.regs[i] = max(r, sk.regs[i]) }
@@ -201,16 +187,10 @@ func getCompressedList(capacity int) *compressedList {
 		return newCompressedList(capacity)
 	}
 
-	cl := c.(*compressedList)
-	cl.b = slices.Grow(cl.b, capacity)
-	return cl
+	return c.(*compressedList)
 }
 
 func putCompressedList(c *compressedList) {
-	if c == nil {
-		return
-	}
-
 	c.reset()
 	compressedListPool.Put(c)
 }
