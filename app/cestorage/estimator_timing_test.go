@@ -267,7 +267,7 @@ func insertSeriesIntoEstimator(e *estimator, numSeries, groupsNum int) {
 		e.insertMany([]protoparser.TimeSerie{
 			{
 				GroupLabels: labels,
-				Fingerprint: uint64(i),
+				Fingerprint: hash([]byte(fmt.Sprintf("foobarbaz%d", i))),
 			},
 		})
 	}
