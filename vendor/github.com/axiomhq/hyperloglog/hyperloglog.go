@@ -218,7 +218,7 @@ func (sk *Sketch) mergeSparse() {
 	}
 
 	keys := sk.keys[:0]
-	slices.Grow(keys, sk.tmpSet.Len())
+	keys = slices.Grow(keys, sk.tmpSet.Len())
 	sk.tmpSet.ForEach(func(k uint32) {
 		keys = append(keys, k)
 	})
@@ -256,6 +256,7 @@ func (sk *Sketch) mergeSparse() {
 
 	sk.sparseList = newList
 	sk.tmpSet.m.Clear()
+	sk.keys = keys[:0]
 }
 
 // MarshalBinary implements the encoding.BinaryMarshaler interface.
@@ -398,16 +399,12 @@ func (sk *Sketch) unmarshalBinaryV2(data []byte) error {
 }
 
 var smallCompressedListPool = &sync.Pool{}
-var mediumCompressedListPool = &sync.Pool{}
+var bigCompressedListPool = &sync.Pool{}
 
 func getCompressedList(capacity int) *compressedList {
-	var pool *sync.Pool
-	if capacity < 1024 {
-		pool = smallCompressedListPool
-	} else if capacity < 8192 {
-		pool = mediumCompressedListPool
-	} else {
-		return newCompressedList(capacity)
+	pool := smallCompressedListPool
+	if capacity >= 2048 {
+		pool = bigCompressedListPool
 	}
 
 	c := pool.Get()
@@ -426,10 +423,10 @@ func putCompressedList(c *compressedList) {
 	}
 
 	c.reset()
-	if cap(c.b) < 1024 {
+	if cap(c.b) < 2048 {
 		smallCompressedListPool.Put(c)
-	} else if cap(c.b) < 8192 {
-		mediumCompressedListPool.Put(c)
+	} else {
+		bigCompressedListPool.Put(c)
 	}
 }
 
