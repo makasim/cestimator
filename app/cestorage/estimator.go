@@ -9,9 +9,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/bytesutil"
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/cgroup"
+	"github.com/VictoriaMetrics/VictoriaMetrics/lib/prompb"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/axiomhq/hyperloglog"
 	"github.com/dgryski/go-metro"
@@ -22,6 +24,7 @@ import (
 type estimator struct {
 	groupBy          []string
 	groupByKeysLabel string
+	baseLabels       []prompb.Label
 
 	groupLimit              int64
 	groupSize               atomic.Int64
@@ -66,6 +69,21 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 		}
 	}
 
+	baseLabels := []prompb.Label{
+		{Name: "__name__", Value: "cardinality_estimate"},
+		{Name: "interval", Value: cfg.Interval.String()},
+	}
+	if len(cfg.Labels) > 0 {
+		keys := make([]string, 0, len(cfg.Labels))
+		for k := range cfg.Labels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			baseLabels = append(baseLabels, prompb.Label{Name: k, Value: cfg.Labels[k]})
+		}
+	}
+
 	groupByKeysLabel := "__global__"
 	if len(cfg.GroupBy) > 0 {
 		groupByKeysLabel = strings.Join(cfg.GroupBy, `,`)
@@ -74,6 +92,7 @@ func newEstimator(cfg EstimatorConfig) (*estimator, error) {
 	e := &estimator{
 		groupBy:                 cfg.GroupBy,
 		groupByKeysLabel:        groupByKeysLabel,
+		baseLabels:              baseLabels,
 		groupLimit:              int64(cfg.GroupLimit),
 		groupRejectedSketch:     mustNewGroupRejectSketch(),
 		groupRejectedSketchPrev: mustNewGroupRejectSketch(),
@@ -489,4 +508,102 @@ func mustNewSketch(precision uint8, sparse bool) *hyperloglog.Sketch {
 
 func hash(v []byte) uint64 {
 	return metro.Hash64(v, 1337)
+}
+
+func b2s(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
+// appendTimeSeries appends one prompb.TimeSeries per cardinality estimate to dst and returns the result.
+// It mirrors writeMetrics exactly — same estimates, same label-sets, different sink (prompb instead of text).
+func (e *estimator) appendTimeSeries(dst []prompb.TimeSeries, nowMs int64) []prompb.TimeSeries {
+	eb0 := e.buckets[0]
+
+	if len(e.groupBy) == 0 {
+		resSK := eb0.newSketch()
+		for _, eb := range e.buckets {
+			eb.writeNoGroupMetric(resSK)
+		}
+
+		labels := make([]prompb.Label, 0, len(e.baseLabels)+1)
+		labels = append(labels, e.baseLabels...)
+		labels = append(labels, prompb.Label{Name: "group_by_keys", Value: "__global__"})
+
+		dst = append(dst, prompb.TimeSeries{
+			Labels:  labels,
+			Samples: []prompb.Sample{{Value: float64(resSK.Estimate()), Timestamp: nowMs}},
+		})
+		return dst
+	}
+
+	for _, eb := range e.buckets {
+		dst = eb.appendGroupTimeSeries(dst, e.baseLabels, nowMs)
+	}
+
+	groupSize := e.groupSize.Load()
+	if groupSize >= int64(float64(e.groupLimit)*0.8) {
+		e.groupRejectedMu.Lock()
+		res := mustNewGroupRejectSketch()
+		e.groupRejectedSketch.Merge(res)
+		e.groupRejectedSketchPrev.Merge(res)
+		e.groupRejectedMu.Unlock()
+
+		groupSize += int64(res.Estimate())
+	}
+
+	labels := make([]prompb.Label, 0, len(e.baseLabels)+2)
+	labels = append(labels, e.baseLabels...)
+	labels = append(labels, prompb.Label{Name: "group_by_keys", Value: "__group__"})
+	labels = append(labels, prompb.Label{Name: "group_by_values", Value: e.groupByKeysLabel})
+
+	dst = append(dst, prompb.TimeSeries{
+		Labels:  labels,
+		Samples: []prompb.Sample{{Value: float64(groupSize), Timestamp: nowMs}},
+	})
+	return dst
+}
+
+// appendGroupTimeSeries appends one prompb.TimeSeries per distinct group value in this bucket.
+// It mirrors writeGroupMetrics exactly — same lock, same dual-window sketch merge.
+func (eb *estimatorBucket) appendGroupTimeSeries(dst []prompb.TimeSeries, baseLabels []prompb.Label, nowMs int64) []prompb.TimeSeries {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+
+	res := eb.newSketch()
+
+	for valuesKey, gsk := range eb.groups {
+		res.Reset()
+		eb.mergeSketches(gsk.Sketch, eb.prevGroups[valuesKey].Sketch, res)
+
+		labels := make([]prompb.Label, 0, len(baseLabels)+2)
+		labels = append(labels, baseLabels...)
+		labels = append(labels, prompb.Label{Name: "group_by_keys", Value: eb.groupByKeysLabel})
+		labels = append(labels, prompb.Label{Name: "group_by_values", Value: valuesKey})
+
+		dst = append(dst, prompb.TimeSeries{
+			Labels:  labels,
+			Samples: []prompb.Sample{{Value: float64(res.Estimate()), Timestamp: nowMs}},
+		})
+	}
+
+	for valuesKey := range eb.prevGroups {
+		if _, ok := eb.groups[valuesKey]; ok {
+			continue
+		}
+
+		res.Reset()
+		eb.mergeSketches(nil, eb.prevGroups[valuesKey].Sketch, res)
+
+		labels := make([]prompb.Label, 0, len(baseLabels)+2)
+		labels = append(labels, baseLabels...)
+		labels = append(labels, prompb.Label{Name: "group_by_keys", Value: eb.groupByKeysLabel})
+		labels = append(labels, prompb.Label{Name: "group_by_values", Value: valuesKey})
+
+		dst = append(dst, prompb.TimeSeries{
+			Labels:  labels,
+			Samples: []prompb.Sample{{Value: float64(res.Estimate()), Timestamp: nowMs}},
+		})
+	}
+
+	return dst
 }
