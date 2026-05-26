@@ -1,7 +1,8 @@
 # cestorage
 
-`cestorage` is a cardinality estimator that receives Prometheus remote write streams
-and exposes approximate time series cardinality as metrics (TODO: support remote write).
+`cestorage` is a cardinality estimator that receives Prometheus remote write streams,
+exposes approximate time series cardinality as metrics, and can push those metrics to
+a Prometheus remote_write endpoint.
 
 It is useful for tracking how many unique time series are flowing through across all metrics, metric name, or broken down by specific labels.
 
@@ -56,6 +57,29 @@ Cardinality generator:
 go run ./app/cegen/main.go -cardI=100 -cardY=20 -template="foo{instance=\"127.0.0.[cardI]\",job=\"ametric[cardY]\"}"
 ```
 
+
+## Remote write push
+
+Cardinality metrics can be pushed periodically to any Prometheus-compatible remote_write endpoint
+(VictoriaMetrics, Mimir, Cortex, Thanos, etc.):
+
+```
+go run ./app/cestorage/... -config=streams.yaml \
+  -remoteWrite.url=http://victoria-metrics:8428/api/v1/write \
+  -remoteWrite.interval=1m
+```
+
+Flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `-remoteWrite.url` | — | Remote_write URL. Repeat for multiple endpoints. |
+| `-remoteWrite.interval` | `1m` | How often to push. |
+| `-remoteWrite.timeout` | `30s` | Per-request HTTP timeout. |
+| `-remoteWrite.extraLabel` | — | Extra `key=value` label on every pushed series. Repeat for multiple. |
+| `-remoteWrite.header` | — | Extra HTTP header (`Name: Value`). Repeat for multiple. |
+
+On shutdown a final push is performed so the last window's data is not lost.
 
 ## Metrics
 

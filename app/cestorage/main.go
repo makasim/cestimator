@@ -46,6 +46,17 @@ func main() {
 		estimators = append(estimators, e)
 	}
 
+	var rw *remoteWriter
+	if len(*remoteWriteURLs) > 0 {
+		var rwErr error
+		rw, rwErr = newRemoteWriter()
+		if rwErr != nil {
+			logger.Fatalf("cannot initialize remote writer: %v", rwErr)
+		}
+		rw.wg.Add(1)
+		go rw.run(estimators)
+	}
+
 	if *cardinalityMetricsExposeAt == `/metrics` {
 		metrics.RegisterMetricsWriter(func(w io.Writer) {
 			writeCardinalityMetrics(w, estimators)
@@ -115,6 +126,9 @@ func main() {
 	logger.Infof("gracefully shutting down webservice at %q", listenAddrs)
 	if err := httpserver.Stop(listenAddrs); err != nil {
 		logger.Errorf("cannot stop http server: %s", err)
+	}
+	if rw != nil {
+		rw.stopAndFlush(estimators)
 	}
 	for _, e := range estimators {
 		e.stop()
